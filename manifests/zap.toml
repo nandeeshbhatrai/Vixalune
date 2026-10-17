@@ -1,0 +1,23 @@
+schema_version = 1
+id = "zap"
+name = "OWASP ZAP"
+summary = "Intercepting proxy and scanner for web application security testing."
+description = "ZAP (Zed Attack Proxy) helps find vulnerabilities in web applications by proxying and actively or passively scanning traffic. Point it only at applications you own or are authorised to test, such as a local lab."
+category = "web_application"
+license = "Apache-2.0"
+homepage = "https://www.zaproxy.org"
+documentation = "https://www.zaproxy.org/docs/"
+source_repository = "https://github.com/zaproxy/zaproxy"
+maintenance = "active"
+recommended_for_beginners = true
+platforms = ["windows_native"]
+prerequisites = ["winget"]
+
+[[install]]
+method = "winget"
+package_id = "ZAP.ZAP"
+
+[verify]
+runtime = "windows_native"
+executable = "zap"
+args = ["-version"]

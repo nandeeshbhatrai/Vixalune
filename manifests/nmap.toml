@@ -7,6 +7,9 @@ category = "reconnaissance"
 license = "LicenseRef-Nmap"
 homepage = "https://nmap.org"
 documentation = "https://nmap.org/book/man.html"
+source_repository = "https://github.com/nmap/nmap"
+maintenance = "active"
+recommended_for_beginners = true
 platforms = ["windows_native"]
 prerequisites = ["winget"]
 

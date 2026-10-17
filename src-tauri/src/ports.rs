@@ -5,6 +5,7 @@
 use crate::domain::activity::ActivityEvent;
 use crate::domain::environment::EnvironmentReport;
 use crate::domain::install_state::InstallState;
+use crate::domain::jobs::{InstalledTool, Job, ToolStateEntry};
 use crate::domain::lab::{LabDefinition, LabState};
 use crate::domain::manifest::{CommandPreview, InstallSpec, ParamValue, ToolManifest};
 use crate::domain::process::{CancellationToken, InstallPlan, OutputSink, ProcessSpec, ProcessStatus, ProgressSink};
@@ -81,6 +82,10 @@ pub trait InstallerAdapter: Send + Sync {
 #[async_trait]
 pub trait InstallationManager: Send + Sync {
     fn state(&self, id: &ToolId) -> AppResult<InstallState>;
+    /// Known states for catalog tools. Tools whose state cannot be determined are omitted
+    /// or reported with `state: None`; never guessed.
+    fn states(&self) -> AppResult<Vec<ToolStateEntry>>;
+    fn installed(&self) -> AppResult<Vec<InstalledTool>>;
     async fn install(&self, id: &ToolId, allow_elevation: bool) -> AppResult<OperationId>;
     async fn cancel(&self, op: OperationId) -> AppResult<()>;
     async fn retry(&self, id: &ToolId, allow_elevation: bool) -> AppResult<OperationId>;
@@ -120,6 +125,22 @@ pub trait LabManager: Send + Sync {
     fn state(&self, id: &LabId) -> AppResult<LabState>;
     async fn start(&self, id: &LabId) -> AppResult<()>;
     async fn stop(&self, id: &LabId) -> AppResult<()>;
+}
+
+// ------------------------------------------------------------------ jobs and links
+
+/// Tracks long-running operations (installs, verifications, runs) for the Jobs screen.
+#[async_trait]
+pub trait JobRegistry: Send + Sync {
+    fn list(&self) -> AppResult<Vec<Job>>;
+    fn output(&self, id: ProcessId) -> AppResult<Vec<String>>;
+    async fn cancel(&self, id: ProcessId) -> AppResult<()>;
+}
+
+/// Opens a catalog link in the user's default browser. The caller selects a link by kind;
+/// the URL always comes from a validated manifest, never from the UI.
+pub trait LinkOpener: Send + Sync {
+    fn open(&self, url: &str) -> AppResult<()>;
 }
 
 // ------------------------------------------------------------------ activity

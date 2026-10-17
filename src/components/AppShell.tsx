@@ -1,36 +1,64 @@
-import { BookOpen, LayoutDashboard, Settings, Wrench } from "lucide-react";
+import { Activity, BookOpen, Briefcase, LayoutDashboard, ListChecks, Settings, Wrench, type LucideIcon } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
+import { useBackend } from "@/infra/backendContext";
+import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { cn } from "@/lib/utils";
 
-const NAV = [
+const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/catalog", label: "Tool catalog", icon: Wrench, end: false },
-  { to: "/learn", label: "Learn", icon: BookOpen, end: false },
-  { to: "/settings", label: "Settings", icon: Settings, end: false },
+  { to: "/catalog", label: "Tool Catalog", icon: Wrench },
+  { to: "/installed", label: "Installed Tools", icon: ListChecks },
+  { to: "/jobs", label: "Running Jobs", icon: Briefcase },
+  { to: "/labs", label: "Learning Labs", icon: BookOpen },
+  { to: "/activity", label: "Activity", icon: Activity },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppShell() {
+  const backend = useBackend();
   return (
-    <div className="flex h-screen">
-      <nav aria-label="Main" className="flex w-56 shrink-0 flex-col gap-1 border-r border-border bg-card p-3">
-        <div className="px-3 py-4 text-lg font-semibold">Vixalune</div>
-        {NAV.map(({ to, label, icon: Icon, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            className={({ isActive }) =>
-              cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted", isActive && "bg-muted font-medium")
-            }
-          >
-            <Icon size={16} aria-hidden /> {label}
-          </NavLink>
-        ))}
-        <p className="mt-auto px-3 text-xs text-muted-foreground">For authorized testing and learning only.</p>
-      </nav>
-      <main className="flex-1 overflow-y-auto p-8">
-        <Outlet />
-      </main>
-    </div>
+    <WorkspaceProvider>
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-primary focus:px-3 focus:py-1.5 focus:text-primary-foreground"
+      >
+        Skip to content
+      </a>
+      <div className="flex h-screen">
+        <nav aria-label="Main" className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-border bg-card p-2">
+          <div className="px-3 pb-4 pt-3 text-base font-semibold tracking-tight">
+            <span className="text-primary">▲</span> Vixalune
+          </div>
+          {NAV.map(({ to, label, icon: Icon, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-2.5 rounded-md px-3 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground",
+                  isActive && "bg-muted font-medium text-foreground",
+                )
+              }
+            >
+              <Icon size={15} aria-hidden /> {label}
+            </NavLink>
+          ))}
+          <p className="mt-auto px-3 pb-1 text-xs text-muted-foreground">For authorized testing and learning only.</p>
+        </nav>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {backend.isDemo ? (
+            <div role="note" className="border-b border-warning/40 bg-warning/15 px-4 py-1.5 text-xs text-warning">
+              <strong>Demonstration data.</strong> Everything shown comes from a built-in demo, not from this computer.
+            </div>
+          ) : null}
+          <main id="main" tabIndex={-1} className="flex-1 overflow-y-auto p-6">
+            <div className="mx-auto max-w-5xl">
+              <Outlet />
+            </div>
+          </main>
+        </div>
+      </div>
+    </WorkspaceProvider>
   );
 }

@@ -8,10 +8,18 @@ pub mod domain;
 pub mod logging;
 pub mod ports;
 
-use adapters::{activity_sqlite::SqliteActivityLogger, env_detector::SystemEnvironmentDetector, registry::ManifestRegistry, resolver::BasicDependencyResolver};
+use adapters::{
+    activity_sqlite::SqliteActivityLogger,
+    env_detector::SystemEnvironmentDetector,
+    link_opener::SystemLinkOpener,
+    registry::ManifestRegistry,
+    resolver::BasicDependencyResolver,
+    unimplemented::{UnimplementedInstallationManager, UnimplementedJobRegistry, UnimplementedLabManager, UnimplementedToolRunner},
+};
 use commands::AppState;
 use config::AppConfig;
 use domain::activity::ActivityKind;
+use domain::jobs::Capabilities;
 use ports::TrustLevel;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,6 +48,12 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         registry: Arc::new(registry),
         detector: Arc::new(SystemEnvironmentDetector),
         resolver: Arc::new(BasicDependencyResolver),
+        installer: Arc::new(UnimplementedInstallationManager),
+        runner: Arc::new(UnimplementedToolRunner),
+        jobs: Arc::new(UnimplementedJobRegistry),
+        labs: Arc::new(UnimplementedLabManager),
+        links: Arc::new(SystemLinkOpener),
+        capabilities: Capabilities::none(),
         activity: Arc::new(SqliteActivityLogger::open(&config.storage.database_path)?),
         data_dir,
         rejected_manifests: rejected,
@@ -63,6 +77,18 @@ pub fn run() {
             commands::list_tools,
             commands::get_tool,
             commands::recent_activity,
+            commands::get_capabilities,
+            commands::list_tool_states,
+            commands::list_installed_tools,
+            commands::list_jobs,
+            commands::get_job_output,
+            commands::cancel_job,
+            commands::install_tool,
+            commands::uninstall_tool,
+            commands::verify_tool,
+            commands::launch_tool,
+            commands::list_labs,
+            commands::open_link,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Vixalune");

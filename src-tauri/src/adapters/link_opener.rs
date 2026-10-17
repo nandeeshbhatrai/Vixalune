@@ -1,0 +1,45 @@
+//! Opens https URLs in the default browser without involving a shell.
+
+use crate::domain::{AppError, AppResult};
+use crate::ports::LinkOpener;
+use url::Url;
+
+#[derive(Default)]
+pub struct SystemLinkOpener;
+
+impl LinkOpener for SystemLinkOpener {
+    fn open(&self, url: &str) -> AppResult<()> {
+        let parsed = Url::parse(url).map_err(|e| AppError::Validation(e.to_string()))?;
+        if parsed.scheme() != "https" {
+            return Err(AppError::Validation("only https links can be opened".into()));
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            // Fixed program and argument array: the URL is a single argument, never parsed by a shell.
+            std::process::Command::new("rundll32.exe")
+                .arg("url.dll,FileProtocolHandler")
+                .arg(parsed.as_str())
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()?;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            Err(AppError::NotImplemented("open link on this OS"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_non_https() {
+        assert!(SystemLinkOpener.open("file:///C:/Windows/System32/calc.exe").is_err());
+        assert!(SystemLinkOpener.open("http://example.com").is_err());
+        assert!(SystemLinkOpener.open("not a url").is_err());
+    }
+}

@@ -46,6 +46,10 @@ Phase column: **1** = delivered as scaffold/skeleton in this phase; later phases
 | F9 | Clear errors with recovery instructions | Working: every `AppError` has a code and recovery text; UI renders both |
 | F10 | Separation of UI / logic / adapters / tool definitions | Enforced by module layout (see ARCHITECTURE.md) |
 
+### Phase 2 UI status
+
+All seven screens exist: Dashboard, Tool Catalog (search + category/platform/execution-method/status filters + sort), Tool detail, Installed Tools, Running Jobs, Learning Labs, Activity, Settings (theme, app info). Every action calls a `Backend` method or is shown disabled with a reason. In this build the core reports `install`, `uninstall`, `verify`, `launch`, `jobs`, `labs` and `installed_detection` as unavailable, so the real app shows "not detected yet" / "not available yet" states instead of numbers. Demo data exists only behind `VITE_DEMO_DATA=true` and is labelled everywhere it appears.
+
 ## 6. Non-functional requirements
 
 - **Safety:** no shell string construction; manifests are data only; no silent elevation (THREAT_MODEL.md).

@@ -37,6 +37,23 @@ domain/            pure types, validation, state machine, redaction. No I/O, no 
 
 Rules: `domain` imports nothing from other layers; `ports` imports only `domain`; `adapters` implement `ports`; `commands`/`lib.rs` wire concrete adapters into `AppState` (constructor injection via `Arc<dyn Trait>`). The UI never calls `invoke` directly outside `src/infra`.
 
+## 2a. Frontend structure (Phase 2)
+
+```
+src/domain/        types.ts (wire mirror), backend.ts (Backend interface), toolStatus.ts, catalog.ts  - pure logic, no React
+src/presentation/  labels.ts (text, tones, icons)                                                     - display strings only
+src/infra/         tauriBackend | demoBackend | unavailableBackend, backendContext (selectBackend)
+src/hooks/         useWorkspace (catalog, capabilities, states, environment), useAction, useAsync, useTheme
+src/components/    reusable pieces (StatusBadge, ToolCard, ToolActions, ConfirmDialog, AsyncView, ...)
+src/pages/         one file per screen
+```
+
+- **Backend selection** (`selectBackend`): Tauri → `tauriBackend`; otherwise `createDemoBackend()` only when `VITE_DEMO_DATA=true` (`npm run dev:demo`); otherwise `unavailableBackend`, whose every call fails with a recovery message. Production builds therefore never contain a path that fabricates status. The demo backend sets `isDemo`, which shows a global banner and per-value "Demo data" tags.
+- **Capabilities**: the core reports which features exist (`get_capabilities`). `actionsFor()` disables any action whose capability is false and shows why; no button is a silent no-op.
+- **Honest status**: backend `InstallState | null` (null = cannot be determined) → `deriveStatus()` → `unknown`, `not_installed`, `ready_to_install` (only with a checked environment and no missing prerequisites), `installing`, `installed`, `verification_failed`, `update_available`, `uninstalling`, `error`.
+- **Links**: the UI asks the backend to open a link by `(tool_id, kind)`; the URL comes from the validated manifest and only `https` is opened (`rundll32 url.dll,FileProtocolHandler`, no shell).
+- Components never call `invoke`, run commands or access the filesystem.
+
 ## 3. Interfaces (src-tauri/src/ports.rs)
 
 | Interface | Responsibility | Phase 1 implementation |
@@ -51,6 +68,10 @@ Rules: `domain` imports nothing from other layers; `ports` imports only `domain`
 | `ProcessManager` | Spawn without shell, stream output, terminate process tree | Trait + placeholder |
 | `LabManager` | Start/stop pinned loopback-only container labs | Trait + placeholder |
 | `ActivityLogger` | Persist redacted activity events | `SqliteActivityLogger` |
+| `JobRegistry` (Phase 2) | List jobs, read output, cancel | Placeholder (empty list; cancel = `NotImplemented`) |
+| `LinkOpener` (Phase 2) | Open an https catalog link in the default browser | `SystemLinkOpener` |
+
+`InstallationManager` also gained `states()` and `installed()` read models for the UI; the placeholder returns empty lists, which the UI presents as "not detected yet", never as "nothing installed".
 
 Async traits use `async-trait` so they remain object-safe (`Arc<dyn …>`); detection and logging are synchronous and invoked via `spawn_blocking` where they touch processes.
 
@@ -64,7 +85,8 @@ Queued ─BeginInstall→ Installing           Verifying ─VerifyFailed→ Fail
 Queued/Downloading/Installing ─RequestCancel→ Cancelling ─CancelConfirmed→ Cancelled
 Failed/Cancelled ─Retry→ Queued            Installed ─UpdateDetected→ UpdateAvailable ─Enqueue→ Queued
 Installed/UpdateAvailable/Failed ─BeginUninstall→ Uninstalling ─UninstallFinished→ NotInstalled
-Installed/UpdateAvailable ─VerifyRequested→ Verifying      any busy state ─Fail→ Failed
+Installed/UpdateAvailable/VerificationFailed ─VerifyRequested→ Verifying      any busy state ─Fail→ Failed
+Verifying ─VerifyFailed→ VerificationFailed (distinct from Failed; retryable and uninstallable)
 ```
 
 ## 5. Command execution model

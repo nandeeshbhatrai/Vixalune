@@ -1,0 +1,116 @@
+import {
+  Bug,
+  FlaskConical,
+  KeyRound,
+  Network,
+  Radar,
+  Search,
+  ShieldCheck,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
+import type { ToolStatus } from "@/domain/toolStatus";
+import type {
+  Category,
+  InstallMethod,
+  InstallSpec,
+  JobKind,
+  JobState,
+  MaintenanceStatus,
+  Prerequisite,
+  RuntimeKind,
+} from "@/domain/types";
+
+export const CATEGORY_LABEL: Record<Category, string> = {
+  reconnaissance: "Reconnaissance",
+  web_application: "Web application",
+  network: "Network",
+  passwords: "Passwords",
+  vulnerability: "Vulnerability",
+  forensics: "Forensics",
+  utilities: "Utilities",
+};
+
+export const CATEGORY_ICON: Record<Category, LucideIcon> = {
+  reconnaissance: Radar,
+  web_application: Bug,
+  network: Network,
+  passwords: KeyRound,
+  vulnerability: ShieldCheck,
+  forensics: Search,
+  utilities: Wrench,
+};
+
+export const RUNTIME_LABEL: Record<RuntimeKind, string> = {
+  windows_native: "Windows",
+  wsl: "WSL",
+  container: "Container",
+};
+
+export const METHOD_LABEL: Record<InstallMethod, string> = {
+  winget: "winget package",
+  wsl_apt: "WSL apt package",
+  container_image: "Container image",
+  download_archive: "Verified download",
+};
+
+export const PREREQ_LABEL: Record<Prerequisite, string> = { winget: "winget", wsl2: "WSL 2", docker: "Docker" };
+
+export const MAINTENANCE_LABEL: Record<MaintenanceStatus, string> = {
+  active: "Actively maintained",
+  stable: "Stable",
+  deprecated: "Deprecated",
+};
+
+export type Tone = "neutral" | "info" | "success" | "warning" | "danger";
+
+export const STATUS_META: Record<ToolStatus, { label: string; tone: Tone; description: string }> = {
+  unknown: { label: "Status unknown", tone: "neutral", description: "Vixalune cannot yet detect whether this tool is installed." },
+  not_installed: { label: "Not installed", tone: "neutral", description: "Not installed, and a prerequisite is missing or not yet checked." },
+  ready_to_install: { label: "Ready to install", tone: "info", description: "All prerequisites are met." },
+  installing: { label: "Installing", tone: "info", description: "An installation is in progress." },
+  installed: { label: "Installed", tone: "success", description: "Installed and verified." },
+  verification_failed: { label: "Verification failed", tone: "warning", description: "The tool is present but its check did not pass." },
+  update_available: { label: "Update available", tone: "info", description: "A newer version exists. Updating is not available in this version yet." },
+  uninstalling: { label: "Uninstalling", tone: "warning", description: "Removal is in progress." },
+  error: { label: "Error", tone: "danger", description: "The last operation failed." },
+};
+
+export const JOB_KIND_LABEL: Record<JobKind, string> = { install: "Install", uninstall: "Uninstall", verify: "Verify", run: "Run" };
+
+export const JOB_STATE_META: Record<JobState, { label: string; tone: Tone }> = {
+  queued: { label: "Queued", tone: "neutral" },
+  running: { label: "Running", tone: "info" },
+  succeeded: { label: "Succeeded", tone: "success" },
+  failed: { label: "Failed", tone: "danger" },
+  cancelled: { label: "Cancelled", tone: "warning" },
+};
+
+/** Human description of an install method, for confirmation dialogs. Display only. */
+export function describeInstall(spec: InstallSpec): string {
+  switch (spec.method) {
+    case "winget":
+      return `winget package ${spec.package_id}${spec.version ? ` (version ${spec.version})` : ""}`;
+    case "wsl_apt":
+      return `apt in WSL: ${spec.packages.join(", ")}`;
+    case "container_image":
+      return `container image ${spec.image} (digest-pinned)`;
+    case "download_archive":
+      return `checksum-verified download from ${new URL(spec.url).host}`;
+  }
+}
+
+export const LAB_ICON = FlaskConical;
+
+export function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+export function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}

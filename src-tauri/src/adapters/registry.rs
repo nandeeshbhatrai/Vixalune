@@ -100,7 +100,7 @@ executable = "{id}"
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("manifests");
         let reg = ManifestRegistry::load_dir(&dir, TrustLevel::Bundled).unwrap();
         assert!(reg.rejected.is_empty(), "{:?}", reg.rejected);
-        assert!(reg.list(&ToolQuery::default()).len() >= 3);
+        assert_eq!(reg.list(&ToolQuery::default()).len(), 5);
     }
 
     #[test]

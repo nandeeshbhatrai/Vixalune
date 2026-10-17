@@ -13,12 +13,15 @@ export type Category =
   | "utilities";
 
 export type Prerequisite = "winget" | "wsl2" | "docker";
+export type MaintenanceStatus = "active" | "stable" | "deprecated";
 
 export type InstallSpec =
   | { method: "winget"; package_id: string; version?: string | null }
   | { method: "wsl_apt"; packages: string[] }
   | { method: "container_image"; image: string; digest: string }
   | { method: "download_archive"; url: string; sha256: string; executable: string };
+
+export type InstallMethod = InstallSpec["method"];
 
 export type ParamValue = boolean | number | string;
 
@@ -48,6 +51,9 @@ export interface ToolManifest {
   license: string;
   homepage: string;
   documentation: string;
+  source_repository?: string | null;
+  maintenance?: MaintenanceStatus | null;
+  recommended_for_beginners: boolean;
   platforms: RuntimeKind[];
   prerequisites: Prerequisite[];
   install: InstallSpec[];
@@ -68,6 +74,7 @@ export interface CatalogEntry {
   trust: TrustLevel;
 }
 
+/** Backend install lifecycle (mirror of Rust `InstallState`). */
 export type InstallState =
   | "not_installed"
   | "queued"
@@ -79,7 +86,63 @@ export type InstallState =
   | "uninstalling"
   | "cancelling"
   | "cancelled"
-  | "failed";
+  | "failed"
+  | "verification_failed";
+
+/** `state` is null when the backend cannot determine it. */
+export interface ToolStateEntry {
+  tool_id: string;
+  state: InstallState | null;
+}
+
+export interface VerificationResult {
+  at: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface InstalledTool {
+  tool_id: string;
+  version?: string | null;
+  location?: string | null;
+  runtime: RuntimeKind;
+  state: InstallState;
+  last_verification?: VerificationResult | null;
+}
+
+export type JobKind = "install" | "uninstall" | "verify" | "run";
+export type JobState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface Job {
+  id: string;
+  tool_id: string;
+  kind: JobKind;
+  state: JobState;
+  started_at: string;
+  finished_at?: string | null;
+  exit_code?: number | null;
+}
+
+export interface Capabilities {
+  install: boolean;
+  uninstall: boolean;
+  verify: boolean;
+  launch: boolean;
+  jobs: boolean;
+  labs: boolean;
+  installed_detection: boolean;
+}
+
+export interface LabDefinition {
+  id: string;
+  name: string;
+  description: string;
+  image: string;
+  digest: string;
+  ports: { container: number; host: number }[];
+}
+
+export type LinkKind = "homepage" | "documentation" | "source_repository";
 
 export type ComponentStatus = { component: Prerequisite } & (
   | { state: "available"; version?: string | null }

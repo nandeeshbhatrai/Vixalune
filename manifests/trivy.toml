@@ -1,0 +1,23 @@
+schema_version = 1
+id = "trivy"
+name = "Trivy"
+summary = "Vulnerability and misconfiguration scanner for images, files and repositories."
+description = "Trivy scans container images, file systems and infrastructure-as-code for known vulnerabilities, misconfigurations and exposed secrets. Use it on artifacts you own or are authorised to assess."
+category = "vulnerability"
+license = "Apache-2.0"
+homepage = "https://trivy.dev"
+documentation = "https://trivy.dev/latest/docs/"
+source_repository = "https://github.com/aquasecurity/trivy"
+maintenance = "active"
+platforms = ["windows_native"]
+prerequisites = ["winget"]
+
+[[install]]
+method = "winget"
+package_id = "AquaSecurity.Trivy"
+
+[verify]
+runtime = "windows_native"
+executable = "trivy"
+args = ["--version"]
+expect_output_contains = "Version"

@@ -32,6 +32,15 @@ pub enum Category {
     Utilities,
 }
 
+/// Curator-asserted maintenance status of the upstream project (not checked at runtime).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaintenanceStatus {
+    Active,
+    Stable,
+    Deprecated,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Prerequisite {
@@ -152,6 +161,11 @@ pub struct ToolManifest {
     pub license: String,
     pub homepage: String,
     pub documentation: String,
+    /// Upstream source repository (https), where one exists.
+    pub source_repository: Option<String>,
+    pub maintenance: Option<MaintenanceStatus>,
+    #[serde(default)]
+    pub recommended_for_beginners: bool,
     pub platforms: Vec<RuntimeKind>,
     #[serde(default)]
     pub prerequisites: Vec<Prerequisite>,
@@ -244,6 +258,9 @@ impl ToolManifest {
         }
         bad(https_url_ok(&self.homepage), "homepage must be an https URL".into());
         bad(https_url_ok(&self.documentation), "documentation must be an https URL".into());
+        if let Some(src) = &self.source_repository {
+            bad(https_url_ok(src), "source_repository must be an https URL".into());
+        }
         bad(!self.platforms.is_empty(), "platforms must not be empty".into());
         bad(!self.install.is_empty(), "install must list at least one method".into());
 
@@ -554,6 +571,15 @@ default = false
         );
         let e = ToolManifest::from_toml(&bad).unwrap_err().to_string();
         assert!(e.contains("https") && e.contains("sha256"), "{e}");
+    }
+
+    #[test]
+    fn source_repository_must_be_https() {
+        let ok = VALID.replace("platforms =", "source_repository = \"https://github.com/nmap/nmap\"\nmaintenance = \"active\"\nplatforms =");
+        let m = ToolManifest::from_toml(&ok).unwrap();
+        assert_eq!(m.maintenance, Some(MaintenanceStatus::Active));
+        let bad = ok.replace("https://github.com/nmap/nmap", "git://example.com/x");
+        assert!(ToolManifest::from_toml(&bad).is_err());
     }
 
     #[test]

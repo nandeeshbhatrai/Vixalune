@@ -11,9 +11,10 @@ export default defineConfig({
     channel: "msedge",
   },
   webServer: {
-    command: "npm run dev",
+    command: "npm run dev:demo",
     url: "http://localhost:1420",
-    reuseExistingServer: true,
+    // Must not reuse a non-demo dev server: it would run against the unavailable backend.
+    reuseExistingServer: false,
     timeout: 60_000,
   },
 });

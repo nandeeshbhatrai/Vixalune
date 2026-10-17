@@ -2,9 +2,17 @@
 
 use crate::domain::activity::{ActivityEvent, ActivityKind};
 use crate::domain::environment::EnvironmentReport;
-use crate::domain::{AppError, AppResult, ToolId};
-use crate::ports::{ActivityLogger, CatalogEntry, DependencyResolver, EnvironmentDetector, ToolQuery, ToolRegistry};
+use crate::domain::install_state::InstallState;
+use crate::domain::jobs::{Capabilities, InstalledTool, Job, LinkKind, ToolStateEntry};
+use crate::domain::lab::LabDefinition;
+use crate::domain::process::{OutputLine, OutputSink};
+use crate::domain::{AppError, AppResult, OperationId, ProcessId, RunId, ToolId};
+use crate::ports::{
+    ActivityLogger, CatalogEntry, DependencyResolver, EnvironmentDetector, InstallationManager, JobRegistry, LabManager,
+    LinkOpener, ToolQuery, ToolRegistry, ToolRunner,
+};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
@@ -14,6 +22,12 @@ pub struct AppState {
     pub registry: Arc<dyn ToolRegistry>,
     pub detector: Arc<dyn EnvironmentDetector>,
     pub resolver: Arc<dyn DependencyResolver>,
+    pub installer: Arc<dyn InstallationManager>,
+    pub runner: Arc<dyn ToolRunner>,
+    pub jobs: Arc<dyn JobRegistry>,
+    pub labs: Arc<dyn LabManager>,
+    pub links: Arc<dyn LinkOpener>,
+    pub capabilities: Capabilities,
     pub activity: Arc<dyn ActivityLogger>,
     pub data_dir: PathBuf,
     pub rejected_manifests: Vec<String>,
@@ -71,4 +85,81 @@ pub fn get_tool(state: State<'_, AppState>, id: String) -> AppResult<CatalogEntr
 #[tauri::command]
 pub fn recent_activity(state: State<'_, AppState>, limit: Option<usize>) -> AppResult<Vec<ActivityEvent>> {
     state.activity.recent(limit.unwrap_or(20).min(200))
+}
+
+// ------------------------------------------------------------------ phase 2: UI read models and actions
+
+#[tauri::command]
+pub fn get_capabilities(state: State<'_, AppState>) -> Capabilities {
+    state.capabilities
+}
+
+#[tauri::command]
+pub fn list_tool_states(state: State<'_, AppState>) -> AppResult<Vec<ToolStateEntry>> {
+    state.installer.states()
+}
+
+#[tauri::command]
+pub fn list_installed_tools(state: State<'_, AppState>) -> AppResult<Vec<InstalledTool>> {
+    state.installer.installed()
+}
+
+#[tauri::command]
+pub fn list_jobs(state: State<'_, AppState>) -> AppResult<Vec<Job>> {
+    state.jobs.list()
+}
+
+#[tauri::command]
+pub fn get_job_output(state: State<'_, AppState>, id: ProcessId) -> AppResult<Vec<String>> {
+    state.jobs.output(id)
+}
+
+#[tauri::command]
+pub async fn cancel_job(state: State<'_, AppState>, id: ProcessId) -> AppResult<()> {
+    state.jobs.cancel(id).await
+}
+
+#[tauri::command]
+pub async fn install_tool(state: State<'_, AppState>, id: String, allow_elevation: Option<bool>) -> AppResult<OperationId> {
+    state.installer.install(&ToolId::new(id)?, allow_elevation.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub async fn uninstall_tool(state: State<'_, AppState>, id: String, allow_elevation: Option<bool>) -> AppResult<OperationId> {
+    state.installer.uninstall(&ToolId::new(id)?, allow_elevation.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub async fn verify_tool(state: State<'_, AppState>, id: String) -> AppResult<InstallState> {
+    state.installer.verify(&ToolId::new(id)?).await
+}
+
+struct DiscardOutput;
+impl OutputSink for DiscardOutput {
+    fn line(&self, _: OutputLine) {}
+}
+
+/// Launch with default parameters. Output streaming is wired up with the run interface.
+#[tauri::command]
+pub async fn launch_tool(state: State<'_, AppState>, id: String) -> AppResult<RunId> {
+    state.runner.start(&ToolId::new(id)?, &HashMap::new(), Arc::new(DiscardOutput)).await
+}
+
+#[tauri::command]
+pub fn list_labs(state: State<'_, AppState>) -> Vec<LabDefinition> {
+    state.labs.list()
+}
+
+/// The UI names a tool and a link kind; the URL is read from the validated manifest.
+#[tauri::command]
+pub fn open_link(state: State<'_, AppState>, tool_id: String, kind: LinkKind) -> AppResult<()> {
+    let entry = state.registry.get(&ToolId::new(tool_id)?)?;
+    let m = &entry.manifest;
+    let url = match kind {
+        LinkKind::Homepage => Some(m.homepage.as_str()),
+        LinkKind::Documentation => Some(m.documentation.as_str()),
+        LinkKind::SourceRepository => m.source_repository.as_deref(),
+    };
+    let url = url.ok_or_else(|| AppError::NotFound("that link".into()))?;
+    state.links.open(url)
 }

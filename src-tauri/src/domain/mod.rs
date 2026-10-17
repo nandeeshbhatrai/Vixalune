@@ -5,6 +5,7 @@ pub mod environment;
 pub mod errors;
 pub mod ids;
 pub mod install_state;
+pub mod jobs;
 pub mod lab;
 pub mod manifest;
 pub mod process;

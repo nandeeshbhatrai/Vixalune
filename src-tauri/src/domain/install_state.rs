@@ -16,7 +16,10 @@ pub enum InstallState {
     Uninstalling,
     Cancelling,
     Cancelled,
+    /// An install/uninstall step failed.
     Failed,
+    /// The tool is present but its verification check did not pass.
+    VerificationFailed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,19 +54,19 @@ impl InstallState {
         use InstallState as S;
         let next = match (self, event) {
             (S::NotInstalled | S::UpdateAvailable, E::Enqueue) => S::Queued,
-            (S::Failed | S::Cancelled, E::Retry) => S::Queued,
+            (S::Failed | S::Cancelled | S::VerificationFailed, E::Retry) => S::Queued,
             (S::Queued, E::BeginDownload) => S::Downloading,
             (S::Queued, E::BeginInstall) => S::Installing,
             (S::Downloading, E::BeginInstall) => S::Installing,
             (S::Installing, E::InstallFinished) => S::Verifying,
-            (S::Installed | S::UpdateAvailable, E::VerifyRequested) => S::Verifying,
+            (S::Installed | S::UpdateAvailable | S::VerificationFailed, E::VerifyRequested) => S::Verifying,
             (S::Verifying, E::VerifyPassed) => S::Installed,
-            (S::Verifying, E::VerifyFailed) => S::Failed,
+            (S::Verifying, E::VerifyFailed) => S::VerificationFailed,
             (S::Queued | S::Downloading | S::Installing | S::Verifying | S::Uninstalling, E::Fail) => S::Failed,
             (S::Queued | S::Downloading | S::Installing, E::RequestCancel) => S::Cancelling,
             (S::Cancelling, E::CancelConfirmed) => S::Cancelled,
             (S::Installed, E::UpdateDetected) => S::UpdateAvailable,
-            (S::Installed | S::UpdateAvailable | S::Failed, E::BeginUninstall) => S::Uninstalling,
+            (S::Installed | S::UpdateAvailable | S::Failed | S::VerificationFailed, E::BeginUninstall) => S::Uninstalling,
             (S::Uninstalling, E::UninstallFinished) => S::NotInstalled,
             (from, event) => {
                 return Err(AppError::InvalidTransition {
@@ -99,9 +102,11 @@ mod tests {
     }
 
     #[test]
-    fn failed_verification_is_failed_and_retryable() {
-        let end = run(S::Installed, &[E::VerifyRequested, E::VerifyFailed, E::Retry]).unwrap();
-        assert_eq!(end, S::Queued);
+    fn failed_verification_is_distinct_and_retryable() {
+        let failed = run(S::Installed, &[E::VerifyRequested, E::VerifyFailed]).unwrap();
+        assert_eq!(failed, S::VerificationFailed);
+        assert_eq!(failed.apply(E::Retry).unwrap(), S::Queued);
+        assert_eq!(failed.apply(E::BeginUninstall).unwrap(), S::Uninstalling);
     }
 
     #[test]

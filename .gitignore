@@ -7,6 +7,7 @@ test-results/
 *.log
 .env
 .env.*
+!.env.demo
 *.db
 *.db-journal
 .DS_Store

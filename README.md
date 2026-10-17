@@ -2,7 +2,7 @@
 
 A Windows desktop app for beginners to discover, install, run and learn about open-source security tools from one place. For **authorized testing and local labs only**.
 
-Status: **Phase 1** — specification, architecture, typed interfaces and a minimal working shell. Install/run/lab behaviour is not implemented yet. See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md).
+Status: **Phase 2** — complete workbench UI (dashboard, catalog, installed tools, jobs, labs, activity, settings) on the Phase 1 core. Install, launch, verify, uninstall, jobs and labs are **not implemented in the backend yet**; the UI calls the defined backend interface and shows those actions as unavailable. See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). Screenshots (demo data) are in `docs/screenshots/`.
 
 | Doc | Purpose |
 |---|---|
@@ -28,13 +28,15 @@ Open a **new terminal** after installing so `PATH` updates.
 ```bash
 npm install                 # install frontend + Tauri CLI
 npm run tauri:dev           # start the desktop app (Vite + Rust, hot reload)
-npm run dev                 # frontend only, in a browser, with the mock backend (http://localhost:1420)
+npm run dev:demo            # frontend only, in a browser, with clearly labelled DEMO data (http://localhost:1420)
+npm run dev                 # frontend only without a backend: screens show "backend not running" errors
 
 npm run typecheck           # TypeScript
 npm test                    # Vitest + React Testing Library
 npm run rust:check          # cargo check
 npm run rust:test           # Rust unit tests
-npm run test:e2e            # Playwright (starts Vite itself; uses system Edge)
+npm run test:e2e            # Playwright (starts the demo server itself; uses system Edge)
+SCREENSHOTS=1 npm run test:e2e   # also refreshes docs/screenshots (PowerShell: $env:SCREENSHOTS=1)
 npm run build               # typecheck + production frontend build
 npm run tauri:build         # production build (bundling is disabled in tauri.conf.json for now)
 ```

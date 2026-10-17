@@ -2,11 +2,12 @@
 //! with `AppError::NotImplemented` instead of pretending to work.
 
 use crate::domain::install_state::InstallState;
+use crate::domain::jobs::{InstalledTool, Job, ToolStateEntry};
 use crate::domain::lab::{LabDefinition, LabState};
 use crate::domain::manifest::{CommandPreview, ParamValue};
 use crate::domain::process::{OutputSink, ProcessSpec, ProcessStatus};
 use crate::domain::{AppError, AppResult, LabId, OperationId, ProcessId, RunId, ToolId};
-use crate::ports::{InstallationManager, LabManager, ProcessManager, ToolRunner};
+use crate::ports::{InstallationManager, JobRegistry, LabManager, ProcessManager, ToolRunner};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,11 +16,32 @@ pub struct UnimplementedInstallationManager;
 pub struct UnimplementedToolRunner;
 pub struct UnimplementedProcessManager;
 pub struct UnimplementedLabManager;
+pub struct UnimplementedJobRegistry;
+
+#[async_trait]
+impl JobRegistry for UnimplementedJobRegistry {
+    fn list(&self) -> AppResult<Vec<Job>> {
+        Ok(Vec::new())
+    }
+    fn output(&self, id: ProcessId) -> AppResult<Vec<String>> {
+        Err(AppError::NotFound(format!("job '{id}'")))
+    }
+    async fn cancel(&self, _: ProcessId) -> AppResult<()> {
+        Err(AppError::NotImplemented("cancel job"))
+    }
+}
 
 #[async_trait]
 impl InstallationManager for UnimplementedInstallationManager {
     fn state(&self, _id: &ToolId) -> AppResult<InstallState> {
-        Ok(InstallState::NotInstalled)
+        Err(AppError::NotImplemented("installation state detection"))
+    }
+    fn states(&self) -> AppResult<Vec<ToolStateEntry>> {
+        // Nothing is detected yet, so no state is reported (the UI shows "unknown").
+        Ok(Vec::new())
+    }
+    fn installed(&self) -> AppResult<Vec<InstalledTool>> {
+        Ok(Vec::new())
     }
     async fn install(&self, _: &ToolId, _: bool) -> AppResult<OperationId> {
         Err(AppError::NotImplemented("install"))

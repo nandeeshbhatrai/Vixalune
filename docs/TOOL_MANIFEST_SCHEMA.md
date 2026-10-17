@@ -16,6 +16,9 @@ Max size: 256 KiB. Invalid files are skipped (and listed in `AppInfo.rejected_ma
 | `category` | enum | yes | `reconnaissance`, `web_application`, `network`, `passwords`, `vulnerability`, `forensics`, `utilities` |
 | `license` | string | yes | SPDX expression or `LicenseRef-…` |
 | `homepage`, `documentation` | string | yes | `https` URL, no credentials |
+| `source_repository` | string | no | `https` URL of the upstream source repository |
+| `maintenance` | enum | no | `active`, `stable`, `deprecated`. Curator-asserted at authoring time; not checked at runtime |
+| `recommended_for_beginners` | bool | no (false) | Surfaces the tool in the dashboard's beginner recommendations |
 | `platforms` | array of enum | yes, non-empty | `windows_native`, `wsl`, `container` |
 | `prerequisites` | array of enum | no | `winget`, `wsl2`, `docker` |
 | `requires_elevation` | bool | no (false) | Declares that install needs administrator rights; user must approve |
@@ -130,6 +133,7 @@ Trust is **not** a manifest field (a file cannot vouch for itself). The registry
 
 ## Known gaps (v1)
 
-- Package ids and licenses in the sample manifests need verification against the live winget/apt catalogs before release.
+- Package ids were checked with `winget search` on 2026-10-17 for Nmap (`Insecure.Nmap`), ZAP (`ZAP.ZAP`) and Trivy (`AquaSecurity.Trivy`); `WiresharkFoundation.Wireshark` and all licenses/maintenance values still need verification before release.
+- Semgrep has no winget package, so it is defined as a digest-pinned container image (multi-arch index digest fetched from Docker Hub on 2026-10-17). Re-verify the digest before release.
 - No per-tool version-detection or update-source fields yet (needed for `update`).
 - No `labs` or `tutorials` manifests yet (`LabDefinition` exists as a Rust model).

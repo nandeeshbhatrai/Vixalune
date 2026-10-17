@@ -44,6 +44,10 @@ pub struct SetupIssue {
 pub struct EnvironmentReport {
     pub os: String,
     pub supported_os: bool,
+    /// Windows build number (e.g. 26100), when it could be read.
+    pub windows_build: Option<u32>,
+    /// `x64` or `arm64` of the running system.
+    pub architecture: String,
     pub components: Vec<ComponentStatus>,
     pub issues: Vec<SetupIssue>,
 }

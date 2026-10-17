@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+﻿import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppRoutes } from "@/App";
 import type { Backend } from "@/domain/backend";
@@ -14,6 +14,7 @@ export const NO_CAPS: Capabilities = {
   jobs: false,
   labs: false,
   installed_detection: false,
+  install_methods: [],
 };
 
 /** A non-demo backend that behaves like the Phase 2 core: catalog and environment only. */
@@ -40,3 +41,4 @@ export function renderApp(path: string, backend: Backend = createDemoBackend()) 
     </BackendProvider>,
   );
 }
+

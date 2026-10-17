@@ -5,7 +5,7 @@ import type {
   CatalogEntry,
   EnvironmentReport,
   InstalledTool,
-  InstallState,
+  InstallPlan,
   Job,
   LabDefinition,
   LinkKind,
@@ -29,17 +29,23 @@ export interface Backend {
   listTools(query?: ToolQuery): Promise<CatalogEntry[]>;
   getTool(id: string): Promise<CatalogEntry>;
   listToolStates(): Promise<ToolStateEntry[]>;
+  /** Ask the backend to re-detect which tools are present, then persist the answer. */
+  refreshToolStates(): Promise<void>;
   listInstalledTools(): Promise<InstalledTool[]>;
   listJobs(): Promise<Job[]>;
   getJobOutput(jobId: string): Promise<string[]>;
   recentActivity(limit?: number): Promise<ActivityEvent[]>;
   listLabs(): Promise<LabDefinition[]>;
+  /** What installing would do on this machine: prerequisites, privileges, size, blockers. */
+  getInstallPlan(toolId: string): Promise<InstallPlan>;
 
-  // Actions. Each rejects with an AppErrorDto if it cannot be performed.
+  // Actions. Each resolves with a job id (or rejects with an AppErrorDto) and never blocks on the work itself.
   installTool(id: string, allowElevation: boolean): Promise<string>;
   uninstallTool(id: string, allowElevation: boolean): Promise<string>;
-  verifyTool(id: string): Promise<InstallState>;
+  verifyTool(id: string): Promise<string>;
   launchTool(id: string): Promise<string>;
+  /** Grant the consent a job is waiting for. */
+  approveJob(jobId: string): Promise<void>;
   cancelJob(jobId: string): Promise<void>;
   /** Opens a catalog link in the default browser. The backend resolves the URL. */
   openLink(toolId: string, kind: LinkKind): Promise<void>;

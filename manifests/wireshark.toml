@@ -1,9 +1,12 @@
-schema_version = 1
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
 id = "wireshark"
 name = "Wireshark"
 summary = "Network protocol analyser."
 description = "Wireshark captures and inspects network traffic in detail. Capture only on networks you own or are authorised to monitor."
 category = "network"
+tags = ["packet-capture", "protocols"]
 license = "GPL-2.0-or-later"
 homepage = "https://www.wireshark.org"
 documentation = "https://www.wireshark.org/docs/"
@@ -11,15 +14,51 @@ source_repository = "https://gitlab.com/wireshark/wireshark"
 maintenance = "active"
 recommended_for_beginners = true
 platforms = ["windows_native"]
-prerequisites = ["winget"]
-requires_elevation = true
+
+[provenance]
+publisher = "The Wireshark developer community"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (wix/MSI) and version (4.6.9) read from `winget show` on this date.
+verified_on = "2026-10-17"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs Wireshark from the Windows Package Manager."
 
 [[install]]
 method = "winget"
 package_id = "WiresharkFoundation.Wireshark"
 
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog."
+
+[network]
+install = true
+run = false
+
+[privileges]
+install = "required"
+run = "required"
+may_require_restart = false
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
 [verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"
+[[verify.checks]]
+kind = "executable_output"
 runtime = "windows_native"
-executable = "tshark"
+executable = "tshark.exe"
 args = ["--version"]
+locations = ["{ProgramFiles}\\Wireshark"]
 expect_output_contains = "TShark"

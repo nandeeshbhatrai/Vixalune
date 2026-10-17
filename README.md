@@ -1,8 +1,8 @@
-# Vixalune
+﻿# Vixalune
 
 A Windows desktop app for beginners to discover, install, run and learn about open-source security tools from one place. For **authorized testing and local labs only**.
 
-Status: **Phase 2** — complete workbench UI (dashboard, catalog, installed tools, jobs, labs, activity, settings) on the Phase 1 core. Install, launch, verify, uninstall, jobs and labs are **not implemented in the backend yet**; the UI calls the defined backend interface and shows those actions as unavailable. See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). Screenshots (demo data) are in `docs/screenshots/`.
+Status: **Phase 3** — workbench UI on a real installation engine. Install, verify, update, uninstall, cancel/retry and persisted jobs work through one adapter (winget). Launching tools, labs, and the WSL/container/archive adapters are **not implemented**; the UI marks them unavailable. See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). Screenshots (demo data) are in `docs/screenshots/`.
 
 | Doc | Purpose |
 |---|---|
@@ -64,6 +64,32 @@ e2e/              Playwright tests
 
 `%APPDATA%\app.vixalune.desktop\` — `config.toml`, `vixalune.db` (redacted activity log). No telemetry; nothing leaves the machine.
 
+## What genuinely works (Windows 11, verified 2026-10-17)
+
+- **Adapter**: winget (Windows Package Manager) only. WSL, container and archive installs are refused with an explanation until their adapters exist.
+- **Tool proven end to end on real Windows**: **Trivy** — real `winget install`, verification by running `trivy.exe --version` plus winget's package record, persisted record, then real uninstall (see the integration test below).
+- **Tools whose manifests are validated and use the same tested adapter, but were not installed here**: Nmap, Wireshark, OWASP ZAP. Their install folders/verification commands are unproven until exercised.
+- **Semgrep**: catalog entry only (container image); cannot be installed yet.
+- Real read-only detection (`winget list`) runs for all winget tools at startup.
+
+## Tests
+
+```bash
+npm test                      # 68 frontend tests
+cargo test --manifest-path src-tauri/Cargo.toml     # 110 Rust unit tests (mock installer, real SQLite)
+npm run test:e2e              # Playwright, demo data
+```
+
+Opt-in tests against the real winget (never run by default):
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml --test winget_integration -- --ignored read_only      # read-only
+$env:VIXALUNE_INTEGRATION_INSTALL = "1"
+cargo test --manifest-path src-tauri/Cargo.toml --test winget_integration -- --ignored --nocapture real_install   # installs then removes Trivy
+```
+
 ## Known limitations
 
-See "Known limitations" in the [product spec](docs/PRODUCT_SPEC.md). Notably: no installing/running yet, sample manifests need package-id verification, no code signing or bundling.
+See "Known limitations" in the [product spec](docs/PRODUCT_SPEC.md). Notably: only the winget adapter exists, tools cannot be launched yet, Nmap/Wireshark/ZAP installs are untested on real hardware, and there is no code signing or bundling.
+
+

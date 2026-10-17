@@ -1,12 +1,12 @@
-//! Tauri command layer: thin, typed adapters from IPC to application ports. No business logic.
+﻿//! Tauri command layer: thin, typed adapters from IPC to application ports. No business logic.
 
 use crate::domain::activity::{ActivityEvent, ActivityKind};
 use crate::domain::environment::EnvironmentReport;
-use crate::domain::install_state::InstallState;
 use crate::domain::jobs::{Capabilities, InstalledTool, Job, LinkKind, ToolStateEntry};
 use crate::domain::lab::LabDefinition;
 use crate::domain::process::{OutputLine, OutputSink};
-use crate::domain::{AppError, AppResult, OperationId, ProcessId, RunId, ToolId};
+use crate::domain::process::InstallPlan;
+use crate::domain::{AppError, AppResult, OperationId, RunId, ToolId};
 use crate::ports::{
     ActivityLogger, CatalogEntry, DependencyResolver, EnvironmentDetector, InstallationManager, JobRegistry, LabManager,
     LinkOpener, ToolQuery, ToolRegistry, ToolRunner,
@@ -91,7 +91,7 @@ pub fn recent_activity(state: State<'_, AppState>, limit: Option<usize>) -> AppR
 
 #[tauri::command]
 pub fn get_capabilities(state: State<'_, AppState>) -> Capabilities {
-    state.capabilities
+    state.capabilities.clone()
 }
 
 #[tauri::command]
@@ -110,12 +110,12 @@ pub fn list_jobs(state: State<'_, AppState>) -> AppResult<Vec<Job>> {
 }
 
 #[tauri::command]
-pub fn get_job_output(state: State<'_, AppState>, id: ProcessId) -> AppResult<Vec<String>> {
+pub fn get_job_output(state: State<'_, AppState>, id: OperationId) -> AppResult<Vec<String>> {
     state.jobs.output(id)
 }
 
 #[tauri::command]
-pub async fn cancel_job(state: State<'_, AppState>, id: ProcessId) -> AppResult<()> {
+pub async fn cancel_job(state: State<'_, AppState>, id: OperationId) -> AppResult<()> {
     state.jobs.cancel(id).await
 }
 
@@ -130,7 +130,7 @@ pub async fn uninstall_tool(state: State<'_, AppState>, id: String, allow_elevat
 }
 
 #[tauri::command]
-pub async fn verify_tool(state: State<'_, AppState>, id: String) -> AppResult<InstallState> {
+pub async fn verify_tool(state: State<'_, AppState>, id: String) -> AppResult<OperationId> {
     state.installer.verify(&ToolId::new(id)?).await
 }
 
@@ -142,7 +142,7 @@ impl OutputSink for DiscardOutput {
 /// Launch with default parameters. Output streaming is wired up with the run interface.
 #[tauri::command]
 pub async fn launch_tool(state: State<'_, AppState>, id: String) -> AppResult<RunId> {
-    state.runner.start(&ToolId::new(id)?, &HashMap::new(), Arc::new(DiscardOutput)).await
+    state.runner.start(&ToolId::new(id)?, "default", &HashMap::new(), Arc::new(DiscardOutput)).await
 }
 
 #[tauri::command]
@@ -162,4 +162,21 @@ pub fn open_link(state: State<'_, AppState>, tool_id: String, kind: LinkKind) ->
     };
     let url = url.ok_or_else(|| AppError::NotFound("that link".into()))?;
     state.links.open(url)
+}
+
+#[tauri::command]
+pub async fn get_install_plan(state: State<'_, AppState>, id: String) -> AppResult<InstallPlan> {
+    state.installer.plan(&ToolId::new(id)?).await
+}
+
+/// Grant the consent a job is waiting for (it asked before doing anything that may need elevation).
+#[tauri::command]
+pub async fn approve_job(state: State<'_, AppState>, id: OperationId) -> AppResult<()> {
+    state.installer.approve(id).await
+}
+
+/// Re-detect which catalog tools are present and persist the answers.
+#[tauri::command]
+pub async fn refresh_tool_states(state: State<'_, AppState>) -> AppResult<()> {
+    state.installer.refresh_states().await
 }

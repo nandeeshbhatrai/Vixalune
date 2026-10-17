@@ -61,6 +61,33 @@ fn to_state(p: Probe, keep_version: bool) -> ComponentState {
     }
 }
 
+#[cfg(windows)]
+fn windows_build() -> Option<u32> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion")
+        .ok()?
+        .get_value::<String, _>("CurrentBuildNumber")
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+#[cfg(not(windows))]
+fn windows_build() -> Option<u32> {
+    None
+}
+
+fn architecture() -> String {
+    match std::env::consts::ARCH {
+        "x86_64" => "x64".into(),
+        "aarch64" => "arm64".into(),
+        other => other.into(),
+    }
+}
+
 #[derive(Default)]
 pub struct SystemEnvironmentDetector;
 
@@ -80,7 +107,14 @@ impl EnvironmentDetector for SystemEnvironmentDetector {
                 .collect()
         };
         let issues = issues_for(&components, supported_os);
-        EnvironmentReport { os: std::env::consts::OS.to_string(), supported_os, components, issues }
+        EnvironmentReport {
+            os: std::env::consts::OS.to_string(),
+            supported_os,
+            windows_build: windows_build(),
+            architecture: architecture(),
+            components,
+            issues,
+        }
     }
 }
 
@@ -98,5 +132,8 @@ mod tests {
     fn detect_returns_all_components() {
         let r = SystemEnvironmentDetector.detect();
         assert_eq!(r.components.len(), 3);
+        #[cfg(windows)]
+        assert!(r.windows_build.is_some_and(|b| b >= 19041), "{:?}", r.windows_build);
+        assert!(matches!(r.architecture.as_str(), "x64" | "arm64"));
     }
 }

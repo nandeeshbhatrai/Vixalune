@@ -1,4 +1,4 @@
-//! `ToolRegistry` backed by `*.toml` manifests in a directory. Invalid manifests are skipped
+﻿//! `ToolRegistry` backed by `*.toml` manifests in a directory. Invalid manifests are skipped
 //! and reported; one bad file never hides the rest of the catalog.
 
 use crate::domain::manifest::ToolManifest;
@@ -40,6 +40,17 @@ impl ManifestRegistry {
                 Err(e) => rejected.push(AppError::ManifestLoad { path: path.display().to_string(), message: e.to_string() }),
             }
         }
+        // Dependencies must name other catalog tools.
+        let ids: std::collections::HashSet<ToolId> = entries.keys().cloned().collect();
+        let broken: Vec<ToolId> = entries
+            .values()
+            .filter(|e| e.manifest.dependencies.iter().any(|d| !ids.contains(d)))
+            .map(|e| e.manifest.id.clone())
+            .collect();
+        for id in broken {
+            entries.remove(&id);
+            rejected.push(AppError::ManifestLoad { path: id.to_string(), message: "depends on a tool that is not in the catalog".into() });
+        }
         Ok(Self { entries, rejected })
     }
 }
@@ -74,25 +85,9 @@ mod tests {
     use crate::domain::manifest::Category;
 
     fn manifest(id: &str, category: &str) -> String {
-        format!(
-            r#"schema_version = 1
-id = "{id}"
-name = "{id}"
-summary = "A {id} tool"
-description = "d"
-category = "{category}"
-license = "MIT"
-homepage = "https://example.com"
-documentation = "https://example.com/docs"
-platforms = ["windows_native"]
-[[install]]
-method = "winget"
-package_id = "Vendor.{id}"
-[verify]
-runtime = "windows_native"
-executable = "{id}"
-"#
-        )
+        crate::domain::manifest::fixtures::VALID
+            .replace("id = \"nmap\"", &format!("id = \"{id}\""))
+            .replace("category = \"reconnaissance\"", &format!("category = \"{category}\""))
     }
 
     #[test]
@@ -110,9 +105,11 @@ executable = "{id}"
         std::fs::write(dir.path().join("b.toml"), manifest("beta", "passwords")).unwrap();
         std::fs::write(dir.path().join("bad.toml"), "schema_version = 1\nid = \"../x\"").unwrap();
         std::fs::write(dir.path().join("note.txt"), "ignored").unwrap();
+        let orphan = manifest("orphan", "network").replace("platforms = [\"windows_native\"]", "platforms = [\"windows_native\"]\ndependencies = [\"ghost\"]");
+        std::fs::write(dir.path().join("orphan.toml"), orphan).unwrap();
 
         let reg = ManifestRegistry::load_dir(dir.path(), TrustLevel::Bundled).unwrap();
-        assert_eq!(reg.rejected.len(), 1);
+        assert_eq!(reg.rejected.len(), 2); // invalid id + dependency on a missing tool
         assert_eq!(reg.list(&ToolQuery::default()).len(), 2);
         let q = ToolQuery { text: None, category: Some(Category::Passwords) };
         assert_eq!(reg.list(&q).len(), 1);

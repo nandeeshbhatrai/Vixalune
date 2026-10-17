@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+﻿import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Backend } from "@/domain/backend";
 import type { InstallState } from "@/domain/types";
@@ -13,6 +13,7 @@ function withStates(states: Record<string, InstallState | null>, overrides: Part
   return {
     ...demo,
     listToolStates: async () => Object.entries(states).map(([tool_id, state]) => ({ tool_id, state })),
+    listJobs: async () => [],
     ...overrides,
   };
 }
@@ -178,7 +179,8 @@ describe("tool details and actions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Install" }));
     expect(installTool).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("dialog", { name: "Install Trivy?" });
-    expect(within(dialog).getByText(/AquaSecurity\.Trivy/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/AquaSecurity\.Trivy/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Installs the tool from the Windows Package Manager.")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "Install" }));
     await waitFor(() => expect(installTool).toHaveBeenCalledWith("trivy", false));
   });
@@ -189,6 +191,7 @@ describe("tool details and actions", () => {
     await waitFor(async () => expect(await screen.findByRole("button", { name: "Install" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "Install" }));
     const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(/Administrator rights/);
     const confirm = within(dialog).getByRole("button", { name: "Install" });
     expect(confirm).toBeDisabled();
     await userEvent.click(within(dialog).getByRole("checkbox"));
@@ -202,6 +205,7 @@ describe("tool details and actions", () => {
     await waitFor(async () => expect(await screen.findByRole("button", { name: "Install" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "Install" }));
     const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(/Administrator rights/);
     await userEvent.click(within(dialog).getByRole("button", { name: "Install" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Planned for a later phase.");
   });
@@ -230,6 +234,55 @@ describe("tool details and actions", () => {
   });
 });
 
+describe("install plan", () => {
+  it("blocks the install and explains why when the tool cannot be installed here", async () => {
+    renderApp("/catalog/semgrep", withStates({ semgrep: "not_installed" }));
+    // Semgrep needs the container installer: the page already says so and Install stays disabled.
+    expect(await screen.findByText(/does not include yet/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
+  });
+
+  it("shows prerequisites, reasons and a blocker in the plan dialog", async () => {
+    const backend = withStates({ trivy: "not_installed" }, {
+      getInstallPlan: async (id) => ({
+        ...(await createDemoBackend().getInstallPlan(id)),
+        missing_prerequisites: ["winget"],
+        unsupported_reason: null,
+      }),
+    });
+    renderApp("/catalog/trivy", backend);
+    await waitFor(async () => expect(await screen.findByRole("button", { name: "Install" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Install" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/Install first: winget/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Install" })).toBeDisabled();
+  });
+
+  it("shows live job progress instead of action buttons while an install runs", async () => {
+    const backend = createDemoBackend();
+    renderApp("/catalog/wireshark", {
+      ...backend,
+      listJobs: async () => [
+        {
+          id: "j1",
+          tool_id: "wireshark",
+          kind: "install",
+          phase: "installing",
+          message: "Downloading",
+          percent: 40,
+          started_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          allow_elevation: true,
+        },
+      ],
+      listToolStates: async () => [{ tool_id: "wireshark", state: "installing" }],
+    });
+    expect(await screen.findByRole("progressbar", { name: "Install progress" })).toHaveAttribute("aria-valuenow", "40");
+    expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
+    expect(screen.getByText("Downloading")).toBeInTheDocument();
+  });
+});
+
 describe("installed tools", () => {
   it("shows version, location, environment and verification result", async () => {
     renderApp("/installed");
@@ -255,10 +308,36 @@ describe("jobs", () => {
   it("lists jobs with state, exit status, output and cancel", async () => {
     renderApp("/jobs");
     expect(await screen.findByRole("table")).toBeInTheDocument();
-    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getAllByText("Verifying").length).toBeGreaterThan(0);
     expect(screen.getByText("Succeeded")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /View output for Nmap/ }));
-    expect(await screen.findByLabelText("Job output")).toHaveTextContent("[demo] Installing nmap");
+    expect(await screen.findByLabelText("Job output")).toHaveTextContent("> winget install --id Insecure.Nmap --exact");
+  });
+
+  it("shows an awaiting-approval job with an Approve button that calls the backend", async () => {
+    const approveJob = vi.fn(async () => undefined);
+    const now = new Date().toISOString();
+    renderApp("/jobs", {
+      ...createDemoBackend(),
+      approveJob,
+      listJobs: async () => [
+        { id: "j9", tool_id: "nmap", kind: "install", phase: "awaiting_consent", message: "Waiting for your approval", started_at: now, updated_at: now, allow_elevation: false },
+      ],
+    });
+    expect(await screen.findByText("Awaiting approval")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Approve Nmap/ }));
+    await waitFor(() => expect(approveJob).toHaveBeenCalledWith("j9"));
+  });
+
+  it("shows error details, recovery and exit code for a failed job", async () => {
+    renderApp("/jobs");
+    await userEvent.click(await screen.findByRole("button", { name: /View output for OWASP ZAP/ }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("did not pass verification");
+    expect(alert).toHaveTextContent("Use Verify to re-check");
+    expect(alert).toHaveTextContent("verification_failed");
+    expect(alert).toHaveTextContent("exit code 1");
   });
 
   it("asks for confirmation before cancelling", async () => {
@@ -297,3 +376,6 @@ describe("labs and activity", () => {
     expect(await screen.findByText("No activity yet")).toBeInTheDocument();
   });
 });
+
+
+

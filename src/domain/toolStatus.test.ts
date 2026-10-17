@@ -1,8 +1,8 @@
-import { actionsFor, deriveStatus } from "./toolStatus";
+﻿import { actionsFor, deriveStatus } from "./toolStatus";
 import type { Capabilities, InstallState } from "./types";
 
-const ALL_ON: Capabilities = { install: true, uninstall: true, verify: true, launch: true, jobs: true, labs: true, installed_detection: true };
-const ALL_OFF: Capabilities = { install: false, uninstall: false, verify: false, launch: false, jobs: false, labs: false, installed_detection: false };
+const ALL_ON: Capabilities = { install: true, uninstall: true, verify: true, launch: true, jobs: true, labs: true, installed_detection: true, install_methods: ["winget"] };
+const ALL_OFF: Capabilities = { install: false, uninstall: false, verify: false, launch: false, jobs: false, labs: false, installed_detection: false, install_methods: [] };
 
 describe("deriveStatus", () => {
   it("never guesses: unknown backend state stays unknown", () => {
@@ -59,3 +59,4 @@ describe("actionsFor", () => {
     expect(actionsFor("verification_failed", ALL_ON, []).map((a) => a.action)).toEqual(["verify", "uninstall"]);
   });
 });
+

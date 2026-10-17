@@ -1,4 +1,4 @@
-# Vixalune — Architecture
+﻿# Vixalune — Architecture
 
 ## 1. Stack
 
@@ -54,6 +54,42 @@ src/pages/         one file per screen
 - **Links**: the UI asks the backend to open a link by `(tool_id, kind)`; the URL comes from the validated manifest and only `https` is opened (`rundll32 url.dll,FileProtocolHandler`, no shell).
 - Components never call `invoke`, run commands or access the filesystem.
 
+## 2b. Installation engine (Phase 3)
+
+`engine.rs` (`InstallEngine`) implements `InstallationManager` and `JobRegistry`. It depends only on ports: `ToolRegistry`, `EnvironmentDetector`, `DependencyResolver`, `InstallerAdapter`s, `JobStore`, `ActivityLogger`.
+
+```
+install(tool) ─ start_job: manifest lookup, lifecycle + adapter checks, INSERT job (partial unique index: one active job per tool -> Busy)
+  └ spawned task:
+      queued -> checking_prerequisites   env detect, Windows build/arch, prerequisites, tool dependencies, adapter.preflight (winget show + list)
+             -> awaiting_consent         only if the plan may need administrator rights and allow_elevation was false; waits for approve/cancel
+             -> installing               adapter.install (fixed argv, streamed + redacted output, timeout, cancel kills the process tree)
+             -> verifying                adapter.verify: EVERY manifest check must pass
+             -> succeeded                installation record written (version, location, verification level)
+  failure : -> [rolling_back if this job installed it] -> failed   (JobError: code, message, recovery, detail with exit code + last output)
+  cancel  : -> cancelling -> [rolling_back] -> cancelled
+  verify failed/unavailable -> failed, record state = verification_failed (tool is NOT rolled back; the user decides)
+```
+
+- **State machine**: `JobPhase::apply(JobEvent)` is the only way a phase changes; illegal transitions error (`domain/jobs.rs`, unit-tested).
+- **Concurrency**: the unique index makes duplicate/overlapping requests fail with `Busy` atomically, even across processes; rejected requests create no job.
+- **Rollback** only removes what the failed/cancelled job itself installed (never a pre-existing install), using a fresh cancellation token, and logs what it does.
+- **Adoption**: installing an already-installed tool verifies it instead of reinstalling.
+- **Finalize**: after a job that touched the system and did not succeed, the engine re-reads the real package state so the UI never shows a guess.
+- **Persistence** (`adapters/sqlite_store.rs`, same SQLite file as the activity log, WAL): `jobs`, `job_output` (redacted, ≤ 2000 lines kept per job), `installations` (JSON record per tool). `recover()` runs at startup: jobs left active by a previous run become `failed` (`interrupted`) if they had touched the system, otherwise `cancelled`.
+- **Detection**: `refresh_states()` asks each adapter whether a tool is present (`winget list --id … --exact`). "Unknown" stays unknown; a detected pre-existing install has no verification result.
+- **Audit**: lifecycle events go to the activity log; each executed command is the first line of the job output (`> winget install --id … --exact …`).
+- **UI progress**: the frontend polls `list_jobs` every 1.5 s while any job is active (no push events yet).
+
+### Command execution (`adapters/executor.rs`)
+Absolute program path only (refuses relative); `args` array, `stdin` closed, **environment cleared and rebuilt from an allow-list** (no tokens/API keys inherited); output split on `\n`/`\r`, redacted, capped; timeout and cancellation kill the whole process tree (`taskkill /T /F <pid>`). `winget.exe` is located by `SystemExecutableLocator` (registry PATH + process PATH, `.exe` only, scripts never).
+
+### Adapters
+| Adapter | State |
+|---|---|
+| `WingetAdapter` | Implemented and tested (mock executor + one real run) |
+| WSL apt, container image, verified archive | Interfaces and manifest validation exist; **no adapter** — installs are refused with a clear message until each is implemented and tested |
+
 ## 3. Interfaces (src-tauri/src/ports.rs)
 
 | Interface | Responsibility | Phase 1 implementation |
@@ -62,13 +98,15 @@ src/pages/         one file per screen
 | `ToolManifest` | Typed, validated tool definition (`domain/manifest.rs`) | Done, with validation tests |
 | `EnvironmentDetector` | Probe winget / WSL 2 / Docker, produce `EnvironmentReport` | `SystemEnvironmentDetector` |
 | `DependencyResolver` | Choose install method, list missing prerequisites and elevation need | `BasicDependencyResolver` |
-| `InstallerAdapter` | Execute one `InstallSpec` kind (winget, wsl_apt, container, archive) | Trait only |
-| `InstallationManager` | Own per-tool `InstallState`, orchestrate adapters, cancel/retry/update/uninstall/verify | Trait + placeholder |
+| `InstallerAdapter` | preflight / install / status / verify / uninstall for one `InstallSpec` kind | `WingetAdapter` |
+| `InstallationManager` | Jobs for install/approve/cancel/retry/update/uninstall/verify, plans, detection | `InstallEngine` |
 | `ToolRunner` | Validate parameters, build command preview, start/stop runs | Command builder done (`build_command`); runner is a placeholder |
 | `ProcessManager` | Spawn without shell, stream output, terminate process tree | Trait + placeholder |
 | `LabManager` | Start/stop pinned loopback-only container labs | Trait + placeholder |
 | `ActivityLogger` | Persist redacted activity events | `SqliteActivityLogger` |
-| `JobRegistry` (Phase 2) | List jobs, read output, cancel | Placeholder (empty list; cancel = `NotImplemented`) |
+| `JobRegistry` | List jobs, read output, cancel | `InstallEngine` |
+| `JobStore` (Phase 3) | Durable jobs, output, installation records | `SqliteJobStore` |
+| `CommandExecutor` / `ExecutableLocator` (Phase 3) | Run a fixed argv with timeout/cancel; find `.exe` files | `SystemCommandExecutor` / `SystemExecutableLocator` |
 | `LinkOpener` (Phase 2) | Open an https catalog link in the default browser | `SystemLinkOpener` |
 
 `InstallationManager` also gained `states()` and `installed()` read models for the UI; the placeholder returns empty lists, which the UI presents as "not detected yet", never as "nothing installed".
@@ -134,3 +172,4 @@ Verifying ─VerifyFailed→ VerificationFailed (distinct from Failed; retryable
 5. **shadcn/ui primitives copied in by hand** (Button, Card, Badge) using the same Radix + cva pattern, because the shadcn CLI needs network scaffolding; `components.json` is present so `npx shadcn add` works later.
 6. **TOML for manifests** — comment-friendly for contributors, no code execution; JSON stays the IPC format.
 7. **Minimal Tauri capabilities** — `core:default` only; no shell/fs/opener plugins exposed to the webview.
+

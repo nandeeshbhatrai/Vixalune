@@ -53,3 +53,28 @@ Method: assets → trust boundaries → threats (STRIDE-flavoured) → mitigatio
 3. Show a confirmation dialog listing the exact command preview and elevation need before any install.
 4. UAC elevation only for the specific install command; never keep an elevated helper alive.
 5. Add signature verification for remote manifest bundles before enabling the feature.
+
+## 6. Phase 3 update: installation engine
+
+Implemented controls (all covered by unit tests; the winget path was also exercised for real):
+
+| Threat | Control | Status |
+|---|---|---|
+| T1 scripts in manifests | `deny_unknown_fields` on every table **and** tagged variant; only the closed `InstallSpec` set exists; unknown adapter types fail to parse; tests try `powershell_script`, `shell`, `post_install_script`, `pre_install` | Done |
+| T2/T3 injection | Adapter re-validates package id and pinned version before building argv; argv arrays only; executor refuses relative programs and clears the environment; tests feed `-s`, `; calc`, `&& del`, `$(x)`, newlines, quotes | Done |
+| T4 integrity | Manifest `integrity.level` must match the install method. winget verifies installer hashes itself and the UI says Vixalune does not re-check them. `sha256`/digest pins are validated but their enforcement waits for those adapters | Partly (winget only) |
+| T6 privilege | Vixalune never elevates. Plans state `none`/`possible`/`required`; a job that may need it waits in `awaiting_consent` unless the user ticked consent; UAC is raised by the installer, not by Vixalune | Done |
+| T7 paths | `domain::paths` rejects `..`, absolute, drive, UNC, ADS, reserved device names, trailing dot/space; verification locations may only start with three known-folder placeholders; only `.exe` files are located | Done |
+| T8 secrets | Output and audit text are redacted before storage; child processes get an allow-listed environment, so inherited tokens never reach installers | Done |
+| T10 hangs | Per-command timeouts; cancellation kills the process tree | Done |
+| New: concurrent corruption | Partial unique index allows one active job per tool, across processes | Done |
+| New: false success | Success requires every verification check; `unavailable` ≠ `passed`; failed verification leaves the tool recorded as `verification_failed` | Done |
+| New: crash mid-install | Startup recovery closes interrupted jobs as failed/cancelled and the next verify/retry re-reads real state | Done |
+
+Known gaps and accepted risks:
+
+- winget runs installers with the user's rights and may trigger UAC itself; for portable packages **winget (not Vixalune) may add a PATH entry** ("Path environment variable modified" was observed for Trivy). Vixalune never edits PATH, execution policy, firewall or security settings, and never touches antivirus.
+- `--accept-package-agreements` is passed so installs are non-interactive; the install dialog states this and shows the license.
+- Killing winget with `taskkill /T` ends the process tree but cannot undo what an installer already did; rollback only runs `winget uninstall` for packages this job installed.
+- No Job Objects yet; a hard crash of Vixalune can orphan an installer process.
+- The 1.5 s UI polling interval is the only progress channel (no push events).

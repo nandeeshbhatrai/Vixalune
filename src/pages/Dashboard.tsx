@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleHelp, MinusCircle, XCircle } from "lucide-react";
+﻿import { CheckCircle2, CircleHelp, MinusCircle, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { AsyncView } from "@/components/AsyncView";
 import { DemoTag } from "@/components/DemoTag";
@@ -13,7 +13,7 @@ import type { ComponentStatus } from "@/domain/types";
 import { useAsync } from "@/hooks/useAsync";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useBackend } from "@/infra/backendContext";
-import { formatTime, PREREQ_LABEL } from "@/presentation/labels";
+import { formatTime, isActivePhase, PREREQ_LABEL } from "@/presentation/labels";
 
 const INSTALL_KINDS = new Set(["install_started", "install_succeeded", "install_failed", "uninstalled", "verified"]);
 
@@ -49,12 +49,10 @@ export function Dashboard() {
   const ws = useWorkspace();
   const caps = ws.core.status === "ready" ? ws.core.data.caps : null;
   const [installed] = useAsync(() => (caps?.installed_detection ? backend.listInstalledTools() : Promise.resolve(null)), [backend, caps]);
-  const [jobs] = useAsync(() => (caps?.jobs ? backend.listJobs() : Promise.resolve(null)), [backend, caps]);
   const [activity, retryActivity] = useAsync(() => backend.recentActivity(30), [backend]);
 
   const installedCount = installed.status === "ready" && installed.data ? String(installed.data.length) : "—";
-  const activeJobs =
-    jobs.status === "ready" && jobs.data ? String(jobs.data.filter((j) => j.state === "running" || j.state === "queued").length) : "—";
+  const activeJobs = caps?.jobs && ws.jobs.status === "ready" ? String(ws.jobs.data.filter((j) => isActivePhase(j.phase)).length) : "—";
 
   return (
     <div className="space-y-5">
@@ -181,3 +179,4 @@ export function Dashboard() {
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Bug,
   FlaskConical,
   KeyRound,
@@ -14,8 +14,12 @@ import type {
   Category,
   InstallMethod,
   InstallSpec,
+  ElevationNeed,
+  IntegrityLevel,
   JobKind,
-  JobState,
+  JobPhase,
+  VerificationLevel,
+  VerificationOutcome,
   MaintenanceStatus,
   Prerequisite,
   RuntimeKind,
@@ -76,21 +80,72 @@ export const STATUS_META: Record<ToolStatus, { label: string; tone: Tone; descri
   error: { label: "Error", tone: "danger", description: "The last operation failed." },
 };
 
-export const JOB_KIND_LABEL: Record<JobKind, string> = { install: "Install", uninstall: "Uninstall", verify: "Verify", run: "Run" };
+export const JOB_KIND_LABEL: Record<JobKind, string> = { install: "Install", update: "Update", uninstall: "Uninstall", verify: "Verify", run: "Run" };
 
-export const JOB_STATE_META: Record<JobState, { label: string; tone: Tone }> = {
+export const JOB_PHASE_META: Record<JobPhase, { label: string; tone: Tone }> = {
   queued: { label: "Queued", tone: "neutral" },
-  running: { label: "Running", tone: "info" },
+  checking_prerequisites: { label: "Checking prerequisites", tone: "info" },
+  awaiting_consent: { label: "Awaiting approval", tone: "warning" },
+  installing: { label: "Installing", tone: "info" },
+  verifying: { label: "Verifying", tone: "info" },
+  uninstalling: { label: "Uninstalling", tone: "warning" },
+  cancelling: { label: "Cancelling", tone: "warning" },
+  rolling_back: { label: "Rolling back", tone: "warning" },
   succeeded: { label: "Succeeded", tone: "success" },
   failed: { label: "Failed", tone: "danger" },
-  cancelled: { label: "Cancelled", tone: "warning" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
 };
 
+export const ACTIVE_PHASES: JobPhase[] = [
+  "queued",
+  "checking_prerequisites",
+  "awaiting_consent",
+  "installing",
+  "verifying",
+  "uninstalling",
+  "cancelling",
+  "rolling_back",
+];
+
+export function isActivePhase(p: JobPhase): boolean {
+  return ACTIVE_PHASES.includes(p);
+}
+
+export const PROVENANCE_LABEL = {
+  official_upstream: "from the upstream project",
+  package_repository: "via a package repository",
+  community_maintained: "community maintained",
+} as const;
+
+export const ELEVATION_LABEL: Record<ElevationNeed, string> = {
+  none: "Not needed",
+  possible: "May be requested by the installer. You will be asked first.",
+  required: "Required. Windows will ask you to approve.",
+};
+
+export const INTEGRITY_LABEL: Record<IntegrityLevel, string> = {
+  package_manager: "Checked by the package manager (winget); Vixalune does not re-check it",
+  sha256_pinned: "SHA-256 checked by Vixalune",
+  image_digest: "Image digest checked by the container runtime",
+  unavailable: "No integrity data is available",
+};
+
+export const VERIFICATION_OUTCOME_META: Record<VerificationOutcome, { label: string; tone: Tone }> = {
+  passed: { label: "Passed", tone: "success" },
+  failed: { label: "Failed", tone: "danger" },
+  unavailable: { label: "Could not be checked", tone: "warning" },
+};
+
+export const VERIFICATION_LEVEL_LABEL: Record<VerificationLevel, string> = {
+  executable: "Ran the installed program and checked its output",
+  package_record: "Checked the package manager's record only",
+  none: "No check completed",
+};
 /** Human description of an install method, for confirmation dialogs. Display only. */
 export function describeInstall(spec: InstallSpec): string {
   switch (spec.method) {
     case "winget":
-      return `winget package ${spec.package_id}${spec.version ? ` (version ${spec.version})` : ""}`;
+      return `winget package ${spec.package_id}`;
     case "wsl_apt":
       return `apt in WSL: ${spec.packages.join(", ")}`;
     case "container_image":
@@ -114,3 +169,5 @@ export function formatTime(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+
+

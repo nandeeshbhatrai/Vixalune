@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+﻿import { ArrowLeft } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { AsyncView } from "@/components/AsyncView";
 import { ExternalLink } from "@/components/ExternalLink";
@@ -10,7 +10,17 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { useAsync } from "@/hooks/useAsync";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useBackend } from "@/infra/backendContext";
-import { CATEGORY_LABEL, describeInstall, MAINTENANCE_LABEL, METHOD_LABEL, PREREQ_LABEL, RUNTIME_LABEL } from "@/presentation/labels";
+import {
+  CATEGORY_LABEL,
+  describeInstall,
+  ELEVATION_LABEL,
+  INTEGRITY_LABEL,
+  MAINTENANCE_LABEL,
+  METHOD_LABEL,
+  PREREQ_LABEL,
+  PROVENANCE_LABEL,
+  RUNTIME_LABEL,
+} from "@/presentation/labels";
 
 export function ToolDetail() {
   const { id = "" } = useParams();
@@ -69,9 +79,9 @@ export function ToolDetail() {
                           <span>None</span>
                         ) : (
                           m.prerequisites.map((p) => (
-                            <Badge key={p} tone={envAvailable(p) ? "success" : missing ? "warning" : "neutral"}>
-                              {PREREQ_LABEL[p]}
-                              {ws.env ? (envAvailable(p) ? " · found" : " · missing") : " · not checked"}
+                            <Badge key={p.kind} tone={envAvailable(p.kind) ? "success" : missing ? "warning" : "neutral"} title={p.reason}>
+                              {PREREQ_LABEL[p.kind]}
+                              {ws.env ? (envAvailable(p.kind) ? " · found" : " · missing") : " · not checked"}
                             </Badge>
                           ))
                         )}
@@ -89,7 +99,21 @@ export function ToolDetail() {
                     </div>
                     <div>
                       <dt className="text-xs text-muted-foreground">Administrator rights</dt>
-                      <dd>{m.requires_elevation ? "Needed for installation. You will be asked to approve." : "Not needed"}</dd>
+                      <dd>{ELEVATION_LABEL[m.privileges.install]}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Windows</dt>
+                      <dd>
+                        Build {m.windows.min_build} or newer ({m.windows.architectures.join(", ")})
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Internet</dt>
+                      <dd>{m.network.install ? "Needed to download the tool" : "Not needed to install"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Integrity</dt>
+                      <dd>{INTEGRITY_LABEL[m.integrity.level]}</dd>
                     </div>
                   </dl>
                 </Card>
@@ -107,7 +131,19 @@ export function ToolDetail() {
                     </div>
                     <div>
                       <dt className="text-xs text-muted-foreground">Catalog record</dt>
-                      <dd>{entry.trust === "bundled" ? "Bundled with Vixalune" : "Unsigned remote record"}</dd>
+                      <dd>
+                        {entry.trust === "bundled" ? "Bundled with Vixalune" : "Unsigned remote record"}, revision {m.manifest_version}, maintained by {m.maintainer}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Provenance</dt>
+                      <dd>
+                        {m.provenance.publisher} ({PROVENANCE_LABEL[m.provenance.basis]}); facts checked on {m.provenance.verified_on}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Tags</dt>
+                      <dd className="flex flex-wrap gap-1.5">{m.tags.length ? m.tags.map((t) => <Badge key={t}>{t}</Badge>) : "None"}</dd>
                     </div>
                     <div>
                       <dt className="text-xs text-muted-foreground">Links</dt>
@@ -136,3 +172,4 @@ export function ToolDetail() {
     </div>
   );
 }
+

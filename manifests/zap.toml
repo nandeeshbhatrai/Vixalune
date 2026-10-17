@@ -1,9 +1,12 @@
-schema_version = 1
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
 id = "zap"
 name = "OWASP ZAP"
 summary = "Intercepting proxy and scanner for web application security testing."
 description = "ZAP (Zed Attack Proxy) helps find vulnerabilities in web applications by proxying and actively or passively scanning traffic. Point it only at applications you own or are authorised to test, such as a local lab."
 category = "web_application"
+tags = ["proxy", "scanner", "web"]
 license = "Apache-2.0"
 homepage = "https://www.zaproxy.org"
 documentation = "https://www.zaproxy.org/docs/"
@@ -11,13 +14,43 @@ source_repository = "https://github.com/zaproxy/zaproxy"
 maintenance = "active"
 recommended_for_beginners = true
 platforms = ["windows_native"]
-prerequisites = ["winget"]
+
+[provenance]
+publisher = "ZAP"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (exe) and version (2.17.0) read from `winget show` on this date.
+verified_on = "2026-10-17"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs ZAP from the Windows Package Manager."
 
 [[install]]
 method = "winget"
 package_id = "ZAP.ZAP"
 
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog. The install folder and a runnable check for ZAP have not been verified, so verification only confirms winget's package record."
+
+[network]
+install = true
+run = true
+
+[privileges]
+install = "possible"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
 [verify]
-runtime = "windows_native"
-executable = "zap"
-args = ["-version"]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

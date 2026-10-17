@@ -1,4 +1,4 @@
-import type { Capabilities, EnvironmentReport, InstallState, Prerequisite, ToolManifest } from "./types";
+﻿import type { Capabilities, EnvironmentReport, InstallState, Prerequisite, ToolManifest } from "./types";
 
 /** What the user sees about a tool. Derived from backend state plus environment readiness. */
 export type ToolStatus =
@@ -30,7 +30,7 @@ export const ALL_STATUSES: ToolStatus[] = [
  */
 export function missingPrerequisites(manifest: ToolManifest, env: EnvironmentReport | null | undefined): Prerequisite[] | null {
   if (!env) return null;
-  return manifest.prerequisites.filter((p) => !env.components.some((c) => c.component === p && c.state === "available"));
+  return manifest.prerequisites.map((p) => p.kind).filter((p) => !env.components.some((c) => c.component === p && c.state === "available"));
 }
 
 /**
@@ -74,7 +74,12 @@ export interface ActionAvailability {
 const NOT_AVAILABLE = "Not available in this version of Vixalune yet.";
 
 /** Which actions apply to a status and whether the backend can perform them. */
-export function actionsFor(status: ToolStatus, caps: Capabilities | null, missing: Prerequisite[] | null): ActionAvailability[] {
+export function actionsFor(
+  status: ToolStatus,
+  caps: Capabilities | null,
+  missing: Prerequisite[] | null,
+  installBlockedReason?: string,
+): ActionAvailability[] {
   const cap = (enabled: boolean | undefined, action: ToolAction, extra?: string): ActionAvailability => {
     if (!caps || !enabled) return { action, enabled: false, reason: NOT_AVAILABLE };
     return extra ? { action, enabled: false, reason: extra } : { action, enabled: true };
@@ -84,7 +89,7 @@ export function actionsFor(status: ToolStatus, caps: Capabilities | null, missin
     case "not_installed":
     case "ready_to_install":
     case "error": {
-      const blocked = missing && missing.length > 0 ? `Missing prerequisites: ${missing.join(", ")}.` : undefined;
+      const blocked = installBlockedReason ?? (missing && missing.length > 0 ? `Missing prerequisites: ${missing.join(", ")}.` : undefined);
       return [cap(caps?.install, "install", blocked), ...(status === "error" ? [cap(caps?.uninstall, "uninstall")] : [])];
     }
     case "installed":
@@ -97,3 +102,4 @@ export function actionsFor(status: ToolStatus, caps: Capabilities | null, missin
       return [];
   }
 }
+

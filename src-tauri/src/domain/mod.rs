@@ -8,6 +8,7 @@ pub mod install_state;
 pub mod jobs;
 pub mod lab;
 pub mod manifest;
+pub mod paths;
 pub mod process;
 
 pub use errors::{AppError, AppResult};

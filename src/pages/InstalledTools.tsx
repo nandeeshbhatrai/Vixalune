@@ -1,4 +1,4 @@
-import { PackageOpen } from "lucide-react";
+﻿import { PackageOpen } from "lucide-react";
 import { Link } from "react-router-dom";
 import { AsyncView } from "@/components/AsyncView";
 import { DemoTag } from "@/components/DemoTag";
@@ -13,7 +13,7 @@ import { deriveStatus } from "@/domain/toolStatus";
 import { useAsync } from "@/hooks/useAsync";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useBackend } from "@/infra/backendContext";
-import { formatTime, RUNTIME_LABEL } from "@/presentation/labels";
+import { formatTime, RUNTIME_LABEL, VERIFICATION_LEVEL_LABEL, VERIFICATION_OUTCOME_META } from "@/presentation/labels";
 
 export function InstalledTools() {
   const backend = useBackend();
@@ -72,14 +72,15 @@ export function InstalledTools() {
                           <dd>
                             {it.last_verification ? (
                               <>
-                                <Badge tone={it.last_verification.passed ? "success" : "danger"}>
-                                  {it.last_verification.passed ? "Passed" : "Failed"}
+                                <Badge tone={VERIFICATION_OUTCOME_META[it.last_verification.outcome].tone}>
+                                  {VERIFICATION_OUTCOME_META[it.last_verification.outcome].label}
                                 </Badge>{" "}
                                 <span className="text-xs text-muted-foreground">{formatTime(it.last_verification.at)}</span>
+                                <span className="block text-xs text-muted-foreground">{VERIFICATION_LEVEL_LABEL[it.last_verification.level]}</span>
                                 <span className="block text-xs text-muted-foreground">{it.last_verification.detail}</span>
                               </>
                             ) : (
-                              "Never verified"
+                              "Never verified by Vixalune"
                             )}
                           </dd>
                         </div>
@@ -96,3 +97,4 @@ export function InstalledTools() {
     </div>
   );
 }
+

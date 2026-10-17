@@ -25,6 +25,18 @@ pub enum AppError {
     ElevationRequired(String),
     #[error("operation was cancelled")]
     Cancelled,
+    #[error("{0}")]
+    Busy(String),
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+    #[error("a required prerequisite is missing: {0}")]
+    PrerequisiteMissing(String),
+    #[error("command failed: {message}")]
+    CommandFailed { code: Option<i32>, message: String },
+    #[error("verification did not pass: {0}")]
+    VerificationFailed(String),
+    #[error("timed out: {0}")]
+    TimedOut(String),
     #[error("'{0}' is not implemented in this build yet")]
     NotImplemented(&'static str),
 }
@@ -42,6 +54,12 @@ impl AppError {
             Self::ElevationRequired(_) => "elevation_required",
             Self::Cancelled => "cancelled",
             Self::NotImplemented(_) => "not_implemented",
+            Self::Busy(_) => "busy",
+            Self::Unsupported(_) => "unsupported",
+            Self::PrerequisiteMissing(_) => "prerequisite_missing",
+            Self::CommandFailed { .. } => "command_failed",
+            Self::VerificationFailed(_) => "verification_failed",
+            Self::TimedOut(_) => "timed_out",
         }
     }
 
@@ -64,6 +82,14 @@ impl AppError {
             }
             Self::Cancelled => "Nothing was changed. Start the operation again when ready.",
             Self::NotImplemented(_) => "This feature is planned for a later phase.",
+            Self::Busy(_) => "Wait for the running operation to finish, or cancel it from Running Jobs, then try again.",
+            Self::Unsupported(_) => "This tool cannot be installed on this computer or with this version of Vixalune.",
+            Self::PrerequisiteMissing(_) => "Install the missing prerequisite (see Dashboard > Setup issues), then retry.",
+            Self::CommandFailed { .. } => "Open the job output for details, fix the cause, then retry.",
+            Self::VerificationFailed(_) => {
+                "The tool did not pass its check. Use Verify to re-check, Retry to reinstall, or Uninstall to remove it."
+            }
+            Self::TimedOut(_) => "Check your network connection and available disk space, then retry.",
         }
     }
 }

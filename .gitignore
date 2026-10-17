@@ -1,0 +1,12 @@
+node_modules/
+dist/
+target/
+src-tauri/gen/
+playwright-report/
+test-results/
+*.log
+.env
+.env.*
+*.db
+*.db-journal
+.DS_Store

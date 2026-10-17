@@ -1,0 +1,49 @@
+schema_version = 1
+id = "nmap"
+name = "Nmap"
+summary = "Network discovery and port scanner."
+description = "Nmap discovers hosts and services on a network by sending packets and analysing responses. Use it only against systems you own or are explicitly authorised to test, such as your local lab."
+category = "reconnaissance"
+license = "LicenseRef-Nmap"
+homepage = "https://nmap.org"
+documentation = "https://nmap.org/book/man.html"
+platforms = ["windows_native"]
+prerequisites = ["winget"]
+
+[[install]]
+method = "winget"
+package_id = "Insecure.Nmap"
+
+[verify]
+runtime = "windows_native"
+executable = "nmap"
+args = ["--version"]
+expect_output_contains = "Nmap version"
+
+[run]
+runtime = "windows_native"
+executable = "nmap"
+args = [
+  { kind = "flag", param = "service_scan", flag = "-sV" },
+  { kind = "option", param = "ports", flag = "-p" },
+  { kind = "value", param = "target" },
+]
+
+[[run.parameters]]
+name = "target"
+label = "Target"
+description = "Hostname, IP address or CIDR range you are authorised to scan."
+required = true
+kind = { type = "host" }
+
+[[run.parameters]]
+name = "ports"
+label = "Ports"
+description = "Port list such as 22,80,443 or 1-1024."
+kind = { type = "text", max_len = 64 }
+
+[[run.parameters]]
+name = "service_scan"
+label = "Detect service versions (-sV)"
+kind = { type = "boolean" }
+default = false

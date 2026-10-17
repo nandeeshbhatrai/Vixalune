@@ -1,0 +1,21 @@
+schema_version = 1
+id = "nikto"
+name = "Nikto"
+summary = "Web server vulnerability scanner (runs in WSL)."
+description = "Nikto checks web servers for dangerous files, outdated software and common misconfigurations. Run it only against servers you are authorised to test, such as a local lab container."
+category = "web_application"
+license = "GPL-2.0-or-later"
+homepage = "https://cirt.net/Nikto2"
+documentation = "https://github.com/sullo/nikto/wiki"
+platforms = ["wsl"]
+prerequisites = ["wsl2"]
+
+[[install]]
+method = "wsl_apt"
+packages = ["nikto"]
+
+[verify]
+runtime = "wsl"
+executable = "nikto"
+args = ["-Version"]
+expect_output_contains = "Nikto"

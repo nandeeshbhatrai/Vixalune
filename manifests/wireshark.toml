@@ -1,0 +1,22 @@
+schema_version = 1
+id = "wireshark"
+name = "Wireshark"
+summary = "Network protocol analyser."
+description = "Wireshark captures and inspects network traffic in detail. Capture only on networks you own or are authorised to monitor."
+category = "network"
+license = "GPL-2.0-or-later"
+homepage = "https://www.wireshark.org"
+documentation = "https://www.wireshark.org/docs/"
+platforms = ["windows_native"]
+prerequisites = ["winget"]
+requires_elevation = true
+
+[[install]]
+method = "winget"
+package_id = "WiresharkFoundation.Wireshark"
+
+[verify]
+runtime = "windows_native"
+executable = "tshark"
+args = ["--version"]
+expect_output_contains = "TShark"

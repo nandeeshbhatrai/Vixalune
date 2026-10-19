@@ -106,6 +106,18 @@ impl ContainerToolRunner {
         Ok(())
     }
 
+    /// Number of runs that are currently active.
+    pub fn active_count(&self) -> usize {
+        self.inner.running.lock().unwrap().len()
+    }
+
+    /// Ask every active run to stop (application shutdown). Returns how many were asked.
+    pub fn cancel_all(&self) -> usize {
+        let running = self.inner.running.lock().unwrap();
+        running.values().for_each(|t| t.cancel());
+        running.len()
+    }
+
     pub async fn wait(&self, op: OperationId, timeout: Duration) -> AppResult<Job> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {

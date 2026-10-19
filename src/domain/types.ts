@@ -148,6 +148,8 @@ export type TrustLevel = "bundled" | "remote_unsigned";
 export interface CatalogEntry {
   manifest: ToolManifest;
   trust: TrustLevel;
+  /** SHA-256 of the manifest file as loaded. */
+  digest?: string;
 }
 
 /** Backend install lifecycle (mirror of Rust `InstallState`). */
@@ -298,6 +300,8 @@ export interface AppInfo {
   version: string;
   data_dir: string;
   rejected_manifests: string[];
+  /** Problems found while starting (for example a damaged database that was replaced). */
+  startup_notices?: string[];
 }
 
 export interface ToolQuery {

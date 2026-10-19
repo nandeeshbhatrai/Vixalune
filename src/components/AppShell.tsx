@@ -1,5 +1,6 @@
 ﻿import { Activity, Briefcase, FlaskConical, GraduationCap, LayoutDashboard, ListChecks, Play, Settings, ShieldCheck, Wrench, type LucideIcon } from "lucide-react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
+import { StartupNotices } from "@/components/StartupNotices";
 import { setupSeen } from "@/pages/SetupWizard";
 import { useBackend } from "@/infra/backendContext";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
@@ -59,6 +60,7 @@ export function AppShell({ firstRunRedirect = false }: { firstRunRedirect?: bool
               <strong>Demonstration data.</strong> Everything shown comes from a built-in demo, not from this computer.
             </div>
           ) : null}
+          <StartupNotices />
           <main id="main" tabIndex={-1} className="flex-1 overflow-y-auto p-6">
             <div className="mx-auto max-w-5xl">
               <Outlet />

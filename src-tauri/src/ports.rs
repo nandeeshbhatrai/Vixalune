@@ -39,6 +39,9 @@ pub enum TrustLevel {
 pub struct CatalogEntry {
     pub manifest: ToolManifest,
     pub trust: TrustLevel,
+    /// SHA-256 of the manifest file as loaded. Recorded in the audit log so an install can be tied to the exact definition used.
+    #[serde(default)]
+    pub digest: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -155,6 +158,10 @@ pub trait LineSink: Send + Sync {
 pub struct ExecOptions {
     pub cwd: Option<PathBuf>,
     pub env: Vec<(String, String)>,
+    /// Stop processes the child leaves behind when it exits (tool runs). Installers are left alone.
+    pub kill_leftovers: bool,
+    /// Upper bound on live processes in the child's tree (a fork-bomb guard). `None` = unlimited.
+    pub max_processes: Option<u32>,
 }
 
 #[async_trait]
@@ -172,7 +179,11 @@ pub trait CommandExecutor: Send + Sync {
 
 /// Finds executables using a freshly read system PATH plus explicit extra folders.
 pub trait ExecutableLocator: Send + Sync {
+    /// Folders passed in `extra_dirs` (install record, known folders) win over the PATH.
     fn locate(&self, file_name: &str, extra_dirs: &[PathBuf]) -> Option<PathBuf>;
+    /// A Windows system program (wsl.exe, shutdown.exe, ...) from the system folder only, never from the PATH.
+    /// Use this for anything that may be elevated.
+    fn locate_system(&self, file_name: &str) -> Option<PathBuf>;
 }
 
 // ------------------------------------------------------------------ installation adapters

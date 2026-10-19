@@ -84,10 +84,21 @@ impl ExecutableLocator for SystemExecutableLocator {
         if !valid_file_name(file_name) {
             return None;
         }
-        let mut dirs = registry_path_dirs();
+        // Folders Vixalune knows about (the install record, the profile's known folders) come first, so a program planted
+        // earlier on the PATH cannot shadow the tool that was installed and verified.
+        let mut dirs: Vec<PathBuf> = extra_dirs.to_vec();
+        dirs.extend(registry_path_dirs());
         dirs.extend(process_path_dirs());
-        dirs.extend(extra_dirs.iter().cloned());
         dirs.into_iter().filter(|d| d.is_absolute()).map(|d| d.join(file_name)).find(|c| is_runnable_file(c))
+    }
+
+    fn locate_system(&self, file_name: &str) -> Option<PathBuf> {
+        if !valid_file_name(file_name) {
+            return None;
+        }
+        let root = std::env::var_os("SystemRoot").map(PathBuf::from).filter(|p| p.is_absolute())?;
+        let candidate = root.join("System32").join(file_name);
+        is_runnable_file(&candidate).then_some(candidate)
     }
 }
 

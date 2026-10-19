@@ -457,3 +457,45 @@ async fn end_to_end_a_real_redirect_from_the_practice_server_is_stopped_by_scope
     let p = runner.preview(&zap, "quick-scan", &HashMap::new(), &none()).await.unwrap();
     assert!(p.command.args.iter().any(|a| a == &format!("http://127.0.0.1:{port}/")), "{:?}", p.command.args);
 }
+
+#[tokio::test]
+async fn cleaning_up_stale_run_folders_never_follows_a_junction() {
+    let f = fixture(|_| Step::ok(&[]), &["nmap.exe"]);
+    let runs = f.support.runs_dir.clone();
+    std::fs::create_dir_all(&runs).unwrap();
+    // Something precious outside the runs folder, and a junction to it that is named like a run id.
+    let precious = tempfile::tempdir().unwrap();
+    std::fs::write(precious.path().join("keep.txt"), "do not delete").unwrap();
+    let junction = runs.join(uuid::Uuid::new_v4().to_string());
+    let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&junction).arg(precious.path()).output();
+    if !made.map(|o| o.status.success()).unwrap_or(false) {
+        eprintln!("skipped: could not create a junction");
+        return;
+    }
+    // A genuinely stale run folder is removed; an in-history one and unrelated names are kept.
+    let stale = runs.join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join("report.html"), "x").unwrap();
+    let other = runs.join("not-a-run-id");
+    std::fs::create_dir_all(&other).unwrap();
+    f.support.remove_stale_run_dirs();
+    assert!(precious.path().join("keep.txt").exists(), "the junction target must be untouched");
+    assert!(!stale.exists(), "a stale run folder is removed");
+    assert!(other.exists(), "folders that are not run ids are never touched");
+    let _ = std::process::Command::new("cmd").args(["/C", "rmdir"]).arg(&junction).output();
+}
+
+#[tokio::test]
+async fn shutdown_asks_every_active_run_to_stop_and_leaves_a_truthful_record() {
+    let f = fixture(|_| Step::hang(&["scanning..."]), &["nmap.exe", "trivy.exe"]);
+    let op = f.runner.start(&nmap(), "quick-scan", &HashMap::new(), &none()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(f.runner.active_count(), 1);
+    assert_eq!(f.runner.cancel_all(), 1);
+    let job = f.runner.wait(op, WAIT).await.unwrap();
+    assert_eq!(job.phase, JobPhase::Cancelled);
+    assert_eq!(f.store.get_run(op).unwrap().outcome, Some(RunOutcome::Cancelled));
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(f.runner.active_count(), 0);
+    assert_eq!(f.runner.cancel_all(), 0);
+}

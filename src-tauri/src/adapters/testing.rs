@@ -106,6 +106,9 @@ impl ExecutableLocator for MockLocator {
     fn locate(&self, file_name: &str, _extra: &[PathBuf]) -> Option<PathBuf> {
         self.map.get(&file_name.to_ascii_lowercase()).cloned()
     }
+    fn locate_system(&self, file_name: &str) -> Option<PathBuf> {
+        self.map.get(&file_name.to_ascii_lowercase()).cloned()
+    }
 }
 
 #[derive(Default)]

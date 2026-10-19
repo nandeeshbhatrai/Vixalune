@@ -18,11 +18,27 @@ pub struct LaunchRouter {
     pub container: Arc<ContainerToolRunner>,
     pub native: Arc<NativeToolRunner>,
     support: Arc<RunSupport>,
+    /// At most this many runs at once, across all tools (resource exhaustion guard).
+    max_concurrent: usize,
 }
 
 impl LaunchRouter {
-    pub fn new(registry: Arc<dyn ToolRegistry>, container: Arc<ContainerToolRunner>, native: Arc<NativeToolRunner>, support: Arc<RunSupport>) -> Self {
-        Self { registry, container, native, support }
+    pub fn new(registry: Arc<dyn ToolRegistry>, container: Arc<ContainerToolRunner>, native: Arc<NativeToolRunner>, support: Arc<RunSupport>, max_concurrent: usize) -> Self {
+        Self { registry, container, native, support, max_concurrent: max_concurrent.max(1) }
+    }
+
+    pub fn active_runs(&self) -> usize {
+        self.native.active_count() + self.container.active_count()
+    }
+
+    /// Stop everything that is running and wait briefly for the processes to be cleaned up. Used when the app closes.
+    pub async fn shutdown(&self, grace: std::time::Duration) -> usize {
+        let asked = self.native.cancel_all() + self.container.cancel_all();
+        let deadline = tokio::time::Instant::now() + grace;
+        while self.active_runs() > 0 && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        asked
     }
 
     fn runtime(&self, id: &ToolId, profile: &str) -> AppResult<RuntimeKind> {
@@ -55,6 +71,9 @@ impl ToolRunner for LaunchRouter {
     }
 
     async fn start(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<OperationId> {
+        if self.active_runs() >= self.max_concurrent {
+            return Err(AppError::Busy(format!("{} runs are already active (the limit is {}); wait for one to finish or cancel it", self.active_runs(), self.max_concurrent)));
+        }
         match self.runtime(id, profile)? {
             RuntimeKind::Container => self.container.start(id, profile, values, approvals).await,
             _ => self.native.start(id, profile, values, approvals).await,

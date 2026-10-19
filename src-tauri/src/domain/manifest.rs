@@ -538,6 +538,12 @@ fn bare_name_ok(s: &str) -> bool {
         && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
+/// Windows programs must be plain `.exe` files: scripts (`.bat`, `.cmd`, `.ps1`) would be interpreted by a shell and the
+/// locator refuses them anyway. Linux and container programs are bare names resolved inside their own environment.
+fn executable_ok(runtime: RuntimeKind, s: &str) -> bool {
+    bare_name_ok(s) && (runtime != RuntimeKind::WindowsNative || (s.len() > 4 && s.to_ascii_lowercase().ends_with(".exe")))
+}
+
 fn is_hex(s: &str, len: usize) -> bool {
     s.len() == len && s.chars().all(|c| c.is_ascii_hexdigit())
 }
@@ -717,7 +723,7 @@ impl ToolManifest {
         );
         for c in &self.verify.checks {
             if let VerifyCheck::ExecutableOutput { runtime, executable, args, locations, expect_output_contains } = c {
-                bad(bare_name_ok(executable), format!("verify executable '{executable}' must be a bare file name"));
+                bad(executable_ok(*runtime, executable), format!("verify executable '{executable}' must be a bare file name (a .exe for Windows programs)"));
                 bad(self.platforms.contains(runtime), "verify runtime is not in platforms".into());
                 for a in args {
                     bad(clean_text(a) && a.len() <= 128, "verify args contain an invalid argument".into());
@@ -739,7 +745,7 @@ impl ToolManifest {
             bad(param_name_ok(&run.id.replace('-', "_")), format!("invalid launch profile id '{}'", run.id));
             bad(profile_ids.insert(run.id.as_str()), format!("duplicate launch profile '{}'", run.id));
             bad(!run.label.trim().is_empty() && run.label.len() <= 80, format!("launch profile '{}' needs a label", run.id));
-            bad(bare_name_ok(&run.executable), format!("launch profile '{}': executable must be a bare file name", run.id));
+            bad(executable_ok(run.runtime, &run.executable), format!("launch profile '{}': executable must be a bare file name (a .exe for Windows programs)", run.id));
             bad(self.platforms.contains(&run.runtime), format!("launch profile '{}': runtime is not in platforms", run.id));
             let mut seen = std::collections::HashSet::new();
             for p in &run.parameters {
@@ -877,6 +883,9 @@ pub fn validate_env(env: &[EnvVar]) -> Vec<String> {
         let name_ok = !v.name.is_empty() && v.name.len() <= 64 && v.name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') && !v.name.starts_with(|c: char| c.is_ascii_digit());
         let upper = v.name.to_ascii_uppercase();
         let secretish = ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "API_KEY", "APIKEY", "CREDENTIAL", "PRIVATE"].iter().any(|k| upper.contains(k));
+        if super::process::env_name_is_dangerous(&v.name) {
+            e.push(format!("env name '{}' can change how programs are found or loaded and is not allowed in a manifest", v.name));
+        }
         if !name_ok || secretish {
             e.push(format!("env name '{}' is invalid or looks like a secret (secrets are never put in manifests)", v.name));
         }

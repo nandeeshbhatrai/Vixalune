@@ -17,6 +17,34 @@ const MAX_LINE: usize = 2000;
 const TRIM_ABOVE: i64 = 3000;
 const KEEP_LINES: i64 = 2000;
 
+/// Check the database file before it is opened for real. A file that is not a database, or that fails SQLite's own integrity
+/// check, is moved aside (never deleted) so the application starts with a fresh, empty one and the old file can still be
+/// inspected. Returns where the damaged file went.
+pub fn prepare_database(path: &Path) -> AppResult<Option<std::path::PathBuf>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let healthy = Connection::open(path)
+        .and_then(|c| c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0)))
+        .map(|r| r == "ok")
+        .unwrap_or(false);
+    if healthy {
+        return Ok(None);
+    }
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S");
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "vixalune.db".into());
+    let target = path.with_file_name(format!("{name}.corrupt-{stamp}"));
+    std::fs::rename(path, &target)?;
+    // Stale journal files belong to the damaged file; leaving them would corrupt the new one.
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let side = path.with_file_name(format!("{name}{suffix}"));
+        if side.exists() {
+            let _ = std::fs::rename(&side, path.with_file_name(format!("{name}.corrupt-{stamp}{suffix}")));
+        }
+    }
+    Ok(Some(target))
+}
+
 pub struct SqliteJobStore {
     conn: Mutex<Connection>,
 }
@@ -193,7 +221,11 @@ impl JobStore for SqliteJobStore {
         let mut rows = stmt.query(params![limit as i64])?;
         let mut out = Vec::new();
         while let Some(r) = rows.next()? {
-            out.push(job_from_row(r)?);
+            // One unreadable row must not hide the rest of the list.
+            match job_from_row(r) {
+                Ok(j) => out.push(j),
+                Err(e) => tracing::warn!("skipping an unreadable job record: {e}"),
+            }
         }
         Ok(out)
     }
@@ -305,7 +337,10 @@ impl JobStore for SqliteJobStore {
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         let mut out = Vec::new();
         for s in rows {
-            out.push(unjson(&s?)?);
+            match unjson(&s?) {
+                Ok(r) => out.push(r),
+                Err(e) => tracing::warn!("skipping an unreadable installation record: {e}"),
+            }
         }
         Ok(out)
     }
@@ -341,7 +376,10 @@ impl RunHistory for SqliteJobStore {
         let rows = stmt.query_map(params![limit as i64], |r| r.get::<_, String>(0))?;
         let mut out = Vec::new();
         for s in rows {
-            out.push(unjson(&s?)?);
+            match unjson(&s?) {
+                Ok(r) => out.push(r),
+                Err(e) => tracing::warn!("skipping an unreadable run record: {e}"),
+            }
         }
         Ok(out)
     }

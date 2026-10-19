@@ -125,3 +125,13 @@ mod tests {
     }
 }
 
+/// Variables that change how programs are found or loaded, or that inject code into common runtimes. They are never
+/// passed on from a profile, whatever a manifest says.
+pub fn env_name_is_dangerous(name: &str) -> bool {
+    let n = name.to_ascii_uppercase();
+    const EXACT: &[&str] = &["PATH", "PATHEXT", "COMSPEC", "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PSMODULEPATH", "HOME", "HOMEPATH", "HOMEDRIVE"];
+    const PREFIXES: &[&str] = &["LD_", "DYLD_", "PYTHON", "NODE_", "NPM_", "JAVA", "_JAVA", "JDK_", "DOTNET_", "COR_", "CORECLR_", "PERL", "RUBY", "GEM_", "GIT_", "SSL_", "CURL_", "REQUESTS_", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "PS", "MSBUILD", "COMPLUS_", "VSCMD"];
+    const CONTAINS: &[&str] = &["OPTIONS", "_OPTS", "PRELOAD", "PROFILER", "STARTUP", "HOOK", "SSLKEYLOG"];
+    EXACT.contains(&n.as_str()) || PREFIXES.iter().any(|p| n.starts_with(p)) || CONTAINS.iter().any(|c| n.contains(c))
+}
+

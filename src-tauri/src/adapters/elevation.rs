@@ -27,6 +27,16 @@ pub fn validate_elevated_args(args: &[String]) -> AppResult<()> {
     Ok(())
 }
 
+/// The only programs that may be started with administrator rights live in the Windows System32 folder. A program from
+/// anywhere else (the PATH, the application folder, a download) is refused even if every other check passed.
+pub fn is_system32_program(program: &Path) -> bool {
+    let Some(root) = std::env::var_os("SystemRoot") else { return false };
+    let dir = Path::new(&root).join("System32");
+    program.is_absolute()
+        && program.parent().is_some_and(|p| p.as_os_str().eq_ignore_ascii_case(dir.as_os_str()))
+        && !program.components().any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
 #[async_trait]
 impl ElevatedRunner for UacElevatedRunner {
     #[cfg(windows)]
@@ -37,6 +47,9 @@ impl ElevatedRunner for UacElevatedRunner {
         use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
 
         validate_elevated_args(args)?;
+        if !is_system32_program(program) {
+            return Err(AppError::Validation(format!("elevated program '{}' must be a file in the Windows System32 folder", program.display())));
+        }
         if !program.is_absolute() || !program.is_file() {
             return Err(AppError::Validation(format!("elevated program '{}' must be an existing absolute path", program.display())));
         }
@@ -105,6 +118,17 @@ mod tests {
         for evil in ["a b", "a;b", "a&b", "a|b", "\"x\"", "$(x)", "`x`", "a>b", "", "%PATH%", &"x".repeat(65)] {
             assert!(validate_elevated_args(&[evil.to_string()]).is_err(), "{evil:?}");
         }
+    }
+
+    #[test]
+    fn only_programs_in_the_system_folder_may_be_elevated() {
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        assert!(is_system32_program(&Path::new(&root).join("System32").join("wsl.exe")));
+        for bad in ["wsl.exe", r"C:\Users\me\AppData\Local\Temp\wsl.exe", r"C:\Program Files\Docker\docker.exe"] {
+            assert!(!is_system32_program(Path::new(bad)), "{bad}");
+        }
+        assert!(!is_system32_program(&Path::new(&root).join("System32").join("sub").join("x.exe")), "only the folder itself, not subfolders");
+        assert!(!is_system32_program(&Path::new(&root).join("System32").join("..").join("evil").join("x.exe")));
     }
 
     #[cfg(windows)]

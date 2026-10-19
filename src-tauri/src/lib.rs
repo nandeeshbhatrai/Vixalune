@@ -8,6 +8,8 @@ pub mod domain;
 pub mod engine;
 pub mod logging;
 pub mod ports;
+#[cfg(test)]
+mod security_tests;
 
 use adapters::{
     activity_sqlite::SqliteActivityLogger,
@@ -55,15 +57,32 @@ fn manifests_dir(app: &tauri::App) -> PathBuf {
 fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>> {
     let data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
-    let config = AppConfig::load_or_default(&data_dir.join("config.toml"), &data_dir)?;
+    let mut startup_notices: Vec<String> = Vec::new();
+    let (config, moved_config, config_problem) = AppConfig::load_or_recover(&data_dir.join("config.toml"), &data_dir);
+    if let Some(why) = config_problem {
+        tracing::error!("config.toml was invalid and defaults are used: {why}");
+        startup_notices.push(match moved_config {
+            Some(p) => format!("config.toml could not be used ({why}). It was kept as {} and default settings are in effect.", p.display()),
+            None => format!("config.toml could not be used ({why}); default settings are in effect."),
+        });
+    }
     let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
 
-    let registry = ManifestRegistry::load_dir(&manifests_dir(app), TrustLevel::Bundled)?;
+    let registry = ManifestRegistry::load_dir_or_empty(&manifests_dir(app), TrustLevel::Bundled);
     let rejected: Vec<String> = registry.rejected.iter().map(|e| e.to_string()).collect();
     for r in &rejected {
         tracing::warn!("rejected manifest: {r}");
     }
     let registry = Arc::new(registry);
+    // A damaged database is moved aside and replaced, never allowed to stop the application from starting.
+    match adapters::sqlite_store::prepare_database(&config.storage.database_path) {
+        Ok(Some(moved)) => {
+            tracing::error!("the database was damaged and was moved to {}", moved.display());
+            startup_notices.push(format!("The local database was damaged. It was moved to {} and a new one was created; run history and the record of installed tools were reset (installed tools are detected again automatically).", moved.display()));
+        }
+        Ok(None) => {}
+        Err(e) => return Err(format!("the database could not be checked or replaced: {e}").into()),
+    }
     let activity = Arc::new(SqliteActivityLogger::open(&config.storage.database_path)?);
     let store = Arc::new(SqliteJobStore::open(&config.storage.database_path)?);
 
@@ -130,7 +149,7 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         .with_support(support.clone()),
     );
     let native_runner = Arc::new(NativeToolRunner::new(registry.clone(), executor.clone(), locator.clone(), store.clone(), activity.clone(), support.clone(), home));
-    let runner = Arc::new(LaunchRouter::new(registry.clone(), container_runner, native_runner, support.clone()));
+    let runner = Arc::new(LaunchRouter::new(registry.clone(), container_runner, native_runner, support.clone(), usize::from(config.resources.max_concurrent_processes)));
     let learning = LearningRegistry::bundled(registry.as_ref());
     for r in &learning.rejected {
         tracing::warn!("rejected tutorial: {r}");
@@ -178,6 +197,7 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         activity,
         data_dir,
         rejected_manifests: rejected,
+        startup_notices,
     };
     commands::log(&state, ActivityKind::AppStarted, "Vixalune started");
     Ok(state)
@@ -236,7 +256,19 @@ pub fn run() {
             commands::approve_job,
             commands::refresh_tool_states,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Vixalune");
+        .build(tauri::generate_context!())
+        .expect("error while building Vixalune")
+        .run(|handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                // Stop running tools (and remove their containers) before the process goes away.
+                if let Some(state) = handle.try_state::<AppState>() {
+                    let launch = state.launch.clone();
+                    let asked = tauri::async_runtime::block_on(launch.shutdown(std::time::Duration::from_secs(8)));
+                    if asked > 0 {
+                        tracing::info!("stopped {asked} running tool(s) at shutdown");
+                    }
+                }
+            }
+        });
 }
 

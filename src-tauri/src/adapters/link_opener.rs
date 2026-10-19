@@ -7,6 +7,22 @@ use url::Url;
 #[derive(Default)]
 pub struct SystemLinkOpener;
 
+/// Absolute path of a program in the Windows folder. `Command::new("explorer.exe")` would search the application's own
+/// folder first, so a program planted next to Vixalune could be started instead.
+#[cfg(windows)]
+fn windows_dir(exe: &str) -> AppResult<std::path::PathBuf> {
+    let root = std::env::var_os("SystemRoot").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).ok_or_else(|| AppError::Io("the Windows folder is not known".into()))?;
+    let p = root.join(exe);
+    if p.is_file() { Ok(p) } else { Err(AppError::NotFound(exe.into())) }
+}
+
+#[cfg(windows)]
+fn system32(exe: &str) -> AppResult<std::path::PathBuf> {
+    let root = std::env::var_os("SystemRoot").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).ok_or_else(|| AppError::Io("the Windows folder is not known".into()))?;
+    let p = root.join("System32").join(exe);
+    if p.is_file() { Ok(p) } else { Err(AppError::NotFound(exe.into())) }
+}
+
 impl LinkOpener for SystemLinkOpener {
     fn open(&self, url: &str) -> AppResult<()> {
         let parsed = Url::parse(url).map_err(|e| AppError::Validation(e.to_string()))?;
@@ -18,7 +34,7 @@ impl LinkOpener for SystemLinkOpener {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             // Fixed program and argument array: the URL is a single argument, never parsed by a shell.
-            std::process::Command::new("rundll32.exe")
+            std::process::Command::new(system32("rundll32.exe")?)
                 .arg("url.dll,FileProtocolHandler")
                 .arg(parsed.as_str())
                 .creation_flags(CREATE_NO_WINDOW)
@@ -39,7 +55,7 @@ impl LinkOpener for SystemLinkOpener {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             // Fixed program; the folder is one argument and is not parsed by a shell.
-            std::process::Command::new("explorer.exe").arg(path).creation_flags(CREATE_NO_WINDOW).spawn()?;
+            std::process::Command::new(windows_dir("explorer.exe")?).arg(path).creation_flags(CREATE_NO_WINDOW).spawn()?;
             Ok(())
         }
         #[cfg(not(windows))]

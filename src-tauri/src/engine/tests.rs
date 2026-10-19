@@ -630,3 +630,28 @@ async fn state_survives_restart_and_interrupted_jobs_are_closed() {
 }
 
 
+
+#[tokio::test]
+async fn a_leftover_in_progress_record_is_reported_as_failed_not_as_work_in_progress() {
+    use crate::domain::jobs::InstallationRecord;
+    use crate::domain::manifest::InstallMethod;
+    let h = harness();
+    for transient in [InstallState::Queued, InstallState::Downloading, InstallState::Installing, InstallState::Verifying, InstallState::Uninstalling, InstallState::Cancelling] {
+        h.store
+            .put_installation(&InstallationRecord {
+                tool_id: nmap_id(),
+                state: transient,
+                version: None,
+                location: None,
+                adapter: InstallMethod::Winget,
+                manifest_version: "1.0.0".into(),
+                installed_at: None,
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                last_verification: None,
+            })
+            .unwrap();
+        let state = h.engine.state(&nmap_id()).unwrap();
+        assert_eq!(state, InstallState::Failed, "{transient:?} without an active job must not be shown as in progress");
+        assert_ne!(state, InstallState::Installed, "an interrupted operation must not look installed");
+    }
+}

@@ -278,3 +278,22 @@ describe("Settings: lab list and retention", () => {
     expect(screen.queryByRole("group", { name: "Confirm the target" })).not.toBeInTheDocument();
   });
 });
+
+describe("Start-up notices", () => {
+  it("tells the user when the database was replaced or a catalog file was rejected", async () => {
+    const base = backendWith();
+    renderApp("/", {
+      ...base,
+      getAppInfo: async () => ({ name: "Vixalune", version: "x", data_dir: "C:\data", rejected_manifests: ["bad.toml: invalid"], startup_notices: ["The local database was damaged. It was moved to C:\data\vixalune.db.corrupt-1 and a new one was created."] }),
+    });
+    const alert = await screen.findByRole("alert", { name: "Start-up notices" });
+    expect(alert).toHaveTextContent("database was damaged");
+    expect(alert).toHaveTextContent("bad.toml");
+  });
+
+  it("shows nothing when everything started cleanly", async () => {
+    renderApp("/", backendWith());
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    expect(screen.queryByRole("alert", { name: "Start-up notices" })).not.toBeInTheDocument();
+  });
+});

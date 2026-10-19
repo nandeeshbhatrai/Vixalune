@@ -97,11 +97,12 @@ impl Inner {
     fn system32(&self, exe: &str) -> AppResult<PathBuf> {
         if let Some(root) = std::env::var_os("SystemRoot") {
             let p = PathBuf::from(root).join("System32").join(exe);
-            if p.exists() {
+            if p.is_file() {
                 return Ok(p);
             }
         }
-        self.locator.locate(exe, &[]).ok_or_else(|| AppError::PrerequisiteMissing(format!("{exe} was not found")))
+        // System programs only ever come from the system folder: the result may be run elevated.
+        self.locator.locate_system(exe).ok_or_else(|| AppError::PrerequisiteMissing(format!("{exe} was not found in the Windows system folder")))
     }
 
     fn step(&self, job: &mut Job, event: JobEvent, message: &str) -> AppResult<()> {

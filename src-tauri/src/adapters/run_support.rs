@@ -13,6 +13,17 @@ use std::sync::Arc;
 
 const MAX_REDIRECT_HOPS: usize = 5;
 
+#[cfg(windows)]
+fn is_reparse_point(m: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    m.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT (junctions, mount points, symbolic links)
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(_: &std::fs::Metadata) -> bool {
+    false
+}
+
 pub struct RunSupport {
     pub settings: Arc<dyn SettingsProvider>,
     pub labs: Arc<dyn LabInfo>,
@@ -209,7 +220,10 @@ impl RunSupport {
         let Ok(rd) = std::fs::read_dir(&self.runs_dir) else { return };
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
-            if e.path().is_dir() && uuid::Uuid::parse_str(&name).is_ok() && !keep.contains(&name) {
+            // Only real folders named like a run id: a junction or symbolic link with such a name is left alone, so this
+            // can never delete what a link points at.
+            let real_dir = std::fs::symlink_metadata(e.path()).map(|m| m.is_dir() && !m.file_type().is_symlink() && !is_reparse_point(&m)).unwrap_or(false);
+            if real_dir && uuid::Uuid::parse_str(&name).is_ok() && !keep.contains(&name) {
                 let _ = std::fs::remove_dir_all(e.path());
             }
         }

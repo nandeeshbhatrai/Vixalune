@@ -5,7 +5,33 @@ use crate::domain::manifest::ToolManifest;
 use crate::domain::{AppError, AppResult, ToolId};
 use crate::ports::{CatalogEntry, ToolQuery, ToolRegistry, TrustLevel};
 use std::collections::BTreeMap;
+use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::path::Path;
+
+/// A manifest larger than this is rejected without being parsed (resource exhaustion).
+pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
+/// Upper bound on manifest files considered, so a directory full of files cannot stall start-up.
+pub const MAX_MANIFEST_FILES: usize = 500;
+
+fn read_manifest(path: &Path) -> AppResult<(String, String)> {
+    // Regular files only: a symbolic link or junction could point outside the catalog folder.
+    let meta = std::fs::symlink_metadata(path)?;
+    if !meta.file_type().is_file() {
+        return Err(AppError::Validation("manifests must be regular files, not links".into()));
+    }
+    if meta.len() > MAX_MANIFEST_BYTES {
+        return Err(AppError::Validation(format!("manifest is larger than {} KiB", MAX_MANIFEST_BYTES / 1024)));
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?.take(MAX_MANIFEST_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err(AppError::Validation("manifest grew while it was being read".into()));
+    }
+    let digest: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+    let text = String::from_utf8(bytes).map_err(|_| AppError::Validation("manifest is not valid UTF-8".into()))?;
+    Ok((text, digest))
+}
 
 pub struct ManifestRegistry {
     entries: BTreeMap<ToolId, CatalogEntry>,
@@ -19,22 +45,21 @@ impl ManifestRegistry {
         let mut paths: Vec<_> = std::fs::read_dir(dir)?
             .filter_map(Result::ok)
             .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "toml") && p.is_file())
+                        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+            .take(MAX_MANIFEST_FILES)
             .collect();
         paths.sort();
         for path in paths {
-            let load = std::fs::read_to_string(&path)
-                .map_err(AppError::from)
-                .and_then(|s| ToolManifest::from_toml(&s));
+            let load = read_manifest(&path).and_then(|(s, digest)| ToolManifest::from_toml(&s).map(|m| (m, digest)));
             match load {
-                Ok(m) => {
+                Ok((m, digest)) => {
                     if entries.contains_key(&m.id) {
                         rejected.push(AppError::ManifestLoad {
                             path: path.display().to_string(),
                             message: format!("duplicate tool id '{}'", m.id),
                         });
                     } else {
-                        entries.insert(m.id.clone(), CatalogEntry { manifest: m, trust });
+                        entries.insert(m.id.clone(), CatalogEntry { manifest: m, trust, digest });
                     }
                 }
                 Err(e) => rejected.push(AppError::ManifestLoad { path: path.display().to_string(), message: e.to_string() }),
@@ -52,6 +77,17 @@ impl ManifestRegistry {
             rejected.push(AppError::ManifestLoad { path: id.to_string(), message: "depends on a tool that is not in the catalog".into() });
         }
         Ok(Self { entries, rejected })
+    }
+}
+
+impl ManifestRegistry {
+    /// Like `load_dir`, but an unreadable catalog folder yields an empty catalog plus the reason instead of an error:
+    /// the application must still start and explain the problem.
+    pub fn load_dir_or_empty(dir: &Path, trust: TrustLevel) -> Self {
+        Self::load_dir(dir, trust).unwrap_or_else(|e| Self {
+            entries: BTreeMap::new(),
+            rejected: vec![AppError::ManifestLoad { path: dir.display().to_string(), message: format!("the catalog folder could not be read: {e}") }],
+        })
     }
 }
 

@@ -46,6 +46,85 @@ const ENV_ALLOWLIST: &[&str] = &[
     "LANG",
 ];
 
+pub use crate::domain::process::env_name_is_dangerous;
+
+/// Resumes a process created with CREATE_SUSPENDED. `NtResumeProcess` is the long-stable ntdll entry point for this (the documented
+/// alternative needs the primary thread handle, which the standard library does not expose).
+#[cfg(windows)]
+fn nt_resume_process(process: windows_sys::Win32::Foundation::HANDLE) -> i32 {
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtResumeProcess(process: windows_sys::Win32::Foundation::HANDLE) -> i32;
+    }
+    // SAFETY: called with a live process handle.
+    unsafe { NtResumeProcess(process) }
+}
+
+/// A Windows job object that holds the child and everything it starts. Closing it (including when Vixalune itself exits
+/// or crashes) kills what is still inside, so a run cannot leave unmanaged processes behind.
+#[cfg(windows)]
+struct JobGuard(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+unsafe impl Send for JobGuard {}
+#[cfg(windows)]
+unsafe impl Sync for JobGuard {}
+
+#[cfg(windows)]
+impl JobGuard {
+    /// Put `process` into a new job. `None` if Windows refuses (the caller falls back to `taskkill /T`).
+    fn adopt(process: std::os::windows::io::RawHandle, max_processes: Option<u32>) -> Option<Self> {
+        use windows_sys::Win32::System::JobObjects::*;
+        // SAFETY: plain Win32 calls with a zero-initialised, correctly sized structure and a handle we own.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return None;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if let Some(n) = max_processes {
+                info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+                info.BasicLimitInformation.ActiveProcessLimit = n;
+            }
+            let ok = SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info as *const _ as *const _, std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32) != 0
+                && AssignProcessToJobObject(job, process as _) != 0;
+            if !ok {
+                windows_sys::Win32::Foundation::CloseHandle(job);
+                return None;
+            }
+            Some(Self(job))
+        }
+    }
+
+    fn terminate(&self) {
+        // SAFETY: the handle is valid until drop.
+        unsafe {
+            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1);
+        }
+    }
+
+    /// The child ended normally: closing the job must no longer kill anything that is still running.
+    fn disarm(&self) {
+        use windows_sys::Win32::System::JobObjects::*;
+        // SAFETY: as above.
+        unsafe {
+            let info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            SetInformationJobObject(self.0, JobObjectExtendedLimitInformation, &info as *const _ as *const _, std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        // SAFETY: closing the handle we created; with KILL_ON_JOB_CLOSE still set this ends the remaining members.
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct SystemCommandExecutor;
 
@@ -137,15 +216,31 @@ impl CommandExecutor for SystemCommandExecutor {
             cmd.current_dir(cwd);
         }
         for (k, v) in &opts.env {
+            if env_name_is_dangerous(k) || k.contains(['=', '\0']) || v.contains('\0') {
+                return Err(AppError::Validation(format!("refusing to pass the environment variable '{k}' to a child process")));
+            }
             cmd.env(k, v);
         }
         #[cfg(windows)]
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        // CREATE_NO_WINDOW | CREATE_SUSPENDED: the child is placed in its job object before it runs a single instruction,
+        // so nothing it starts can escape the job.
+        cmd.creation_flags(0x0800_0000 | 0x0000_0004);
 
         let mut child = cmd
             .spawn()
             .map_err(|e| AppError::CommandFailed { code: None, message: format!("could not start '{}': {e}", spec.program.display()) })?;
         let pid = child.id();
+        #[cfg(windows)]
+        let job = child.raw_handle().and_then(|h| JobGuard::adopt(h, opts.max_processes));
+        #[cfg(windows)]
+        if let Some(h) = child.raw_handle() {
+            // SAFETY: `h` is the live process handle owned by `child`.
+            let status = nt_resume_process(h as _);
+            if status < 0 {
+                let _ = child.start_kill();
+                return Err(AppError::CommandFailed { code: None, message: format!("could not start '{}' (resume failed: {status:#x})", spec.program.display()) });
+            }
+        }
         let stdout = child.stdout.take().expect("piped");
         let stderr = child.stderr.take().expect("piped");
         let tail = std::sync::Mutex::new(VecDeque::new());
@@ -179,8 +274,24 @@ impl CommandExecutor for SystemCommandExecutor {
             async {
                 let stop = main.await;
                 if !matches!(stop, Stop::Done(_)) {
+                    #[cfg(windows)]
+                    if let Some(j) = &job {
+                        j.terminate();
+                    } else if let Some(pid) = pid {
+                        kill_tree(pid).await;
+                    }
+                    #[cfg(not(windows))]
                     if let Some(pid) = pid {
                         kill_tree(pid).await;
+                    }
+                } else {
+                    #[cfg(windows)]
+                    if let Some(j) = &job {
+                        if opts.kill_leftovers {
+                            j.terminate();
+                        } else {
+                            j.disarm();
+                        }
                     }
                 }
                 stop
@@ -266,14 +377,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cmd = std::env::var_os("ComSpec").map(PathBuf::from).unwrap_or_else(|| system32("cmd.exe"));
         let spec = CommandSpec { program: cmd, args: vec!["/C".into(), "cd && echo %VIXALUNE_TEST_VALUE%".into()], timeout: Duration::from_secs(20) };
-        let opts = ExecOptions { cwd: Some(dir.path().to_path_buf()), env: vec![("VIXALUNE_TEST_VALUE".into(), "hello-from-profile".into())] };
+        let opts = ExecOptions { cwd: Some(dir.path().to_path_buf()), env: vec![("VIXALUNE_TEST_VALUE".into(), "hello-from-profile".into())], ..Default::default() };
         let r = SystemCommandExecutor.run_in(spec, opts, &sink, &CancellationToken::new()).await.unwrap();
         assert_eq!(r.outcome, CommandOutcome::Exited(0));
         let lines = sink.0.lock().unwrap().join("\n");
         assert!(lines.contains("hello-from-profile"), "{lines}");
         assert!(lines.to_lowercase().contains(&dir.path().file_name().unwrap().to_string_lossy().to_lowercase()), "{lines}");
         // A relative or missing working folder is refused.
-        let bad = ExecOptions { cwd: Some(PathBuf::from("relative")), env: vec![] };
+        let bad = ExecOptions { cwd: Some(PathBuf::from("relative")), ..Default::default() };
         let spec = CommandSpec { program: system32("whoami.exe"), args: vec![], timeout: Duration::from_secs(5) };
         assert!(SystemCommandExecutor.run_in(spec, bad, &sink, &CancellationToken::new()).await.is_err());
     }
@@ -297,5 +408,85 @@ mod tests {
         let lines = sink.0.lock().unwrap().join("\n").to_lowercase();
         assert!(!lines.contains("\\"), "whoami output (DOMAIN\\user) must not appear: {lines}");
     }
-}
 
+    #[test]
+    fn dangerous_environment_names_are_recognised() {
+        for bad in ["PATH", "path", "PATHEXT", "ComSpec", "SystemRoot", "TEMP", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "NODE_OPTIONS", "PYTHONPATH", "PYTHONSTARTUP", "DOTNET_STARTUP_HOOKS", "COR_PROFILER", "LD_PRELOAD", "HTTPS_PROXY", "GIT_SSH_COMMAND", "PSModulePath", "MSBUILDEXTRA", "SSLKEYLOGFILE", "NMAP_OPTIONS"] {
+            assert!(env_name_is_dangerous(bad), "{bad}");
+        }
+        for ok in ["LANG", "NO_COLOR", "TZ", "CI", "SEMGREP_SEND_METRICS"] {
+            assert!(!env_name_is_dangerous(ok), "{ok}");
+        }
+    }
+
+    #[tokio::test]
+    async fn dangerous_or_malformed_environment_is_refused_before_anything_starts() {
+        let sink = Collect::default();
+        for (k, v) in [("JAVA_TOOL_OPTIONS", "-javaagent:x.jar"), ("PATH", "C:\\evil"), ("A=B", "x"), ("OK", "a\0b")] {
+            let opts = ExecOptions { env: vec![(k.into(), v.into())], ..Default::default() };
+            let spec = CommandSpec { program: system32("whoami.exe"), args: vec![], timeout: Duration::from_secs(5) };
+            assert!(SystemCommandExecutor.run_in(spec, opts, &sink, &CancellationToken::new()).await.is_err(), "{k}");
+        }
+        assert!(sink.0.lock().unwrap().is_empty(), "nothing ran");
+    }
+
+    #[tokio::test]
+    async fn the_child_environment_is_scrubbed_of_unlisted_variables() {
+        std::env::set_var("VIXALUNE_SECRET_TEST", "should-not-leak");
+        let sink = Collect::default();
+        let cmd = std::env::var_os("ComSpec").map(PathBuf::from).unwrap_or_else(|| system32("cmd.exe"));
+        let spec = CommandSpec { program: cmd, args: vec!["/C".into(), "set".into()], timeout: Duration::from_secs(20) };
+        let r = SystemCommandExecutor.run(spec, &sink, &CancellationToken::new()).await.unwrap();
+        assert_eq!(r.outcome, CommandOutcome::Exited(0));
+        assert!(!sink.0.lock().unwrap().join("
+").contains("should-not-leak"));
+    }
+
+    /// Starts a grandchild that writes a marker file after ~3 s, then lets the parent exit immediately.
+    async fn run_with_late_grandchild(kill_leftovers: bool) -> bool {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("child.cmd"), "@echo off
+ping -n 4 127.0.0.1 >nul
+echo late> late.txt
+").unwrap();
+        let cmd = std::env::var_os("ComSpec").map(PathBuf::from).unwrap_or_else(|| system32("cmd.exe"));
+        std::fs::write(dir.path().join("parent.cmd"), "@echo off
+start \"\" /B cmd /C .\\child.cmd
+").unwrap();
+        let spec = CommandSpec { program: cmd, args: vec!["/C".into(), ".\\parent.cmd".into()], timeout: Duration::from_secs(20) };
+        let opts = ExecOptions { cwd: Some(dir.path().to_path_buf()), kill_leftovers, ..Default::default() };
+        let r = SystemCommandExecutor.run_in(spec, opts, &Collect::default(), &CancellationToken::new()).await.unwrap();
+        assert!(matches!(r.outcome, CommandOutcome::Exited(_)));
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        dir.path().join("late.txt").exists()
+    }
+
+    #[tokio::test]
+    async fn processes_left_behind_by_a_tool_run_are_stopped_but_installers_are_not_disturbed() {
+        assert!(!run_with_late_grandchild(true).await, "a tool run must not leave a background process behind");
+        assert!(run_with_late_grandchild(false).await, "without kill_leftovers the descendants are left alone");
+    }
+
+    #[tokio::test]
+    async fn cancelling_kills_grandchildren_too() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("child.cmd"), "@echo off
+ping -n 5 127.0.0.1 >nul
+echo late> late.txt
+").unwrap();
+        let cmd = std::env::var_os("ComSpec").map(PathBuf::from).unwrap_or_else(|| system32("cmd.exe"));
+        // The parent waits for the child, so only a tree kill can stop the marker from appearing.
+        let spec = CommandSpec { program: cmd, args: vec!["/C".into(), ".\\child.cmd".into()], timeout: Duration::from_secs(60) };
+        let cancel = CancellationToken::new();
+        let c2 = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(700)).await;
+            c2.cancel();
+        });
+        let opts = ExecOptions { cwd: Some(dir.path().to_path_buf()), ..Default::default() };
+        let r = SystemCommandExecutor.run_in(spec, opts, &Collect::default(), &cancel).await.unwrap();
+        assert_eq!(r.outcome, CommandOutcome::Cancelled);
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        assert!(!dir.path().join("late.txt").exists(), "the grandchild must not survive a cancel");
+    }
+}

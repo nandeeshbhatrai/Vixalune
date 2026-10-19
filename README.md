@@ -9,6 +9,7 @@ Status: **Phase 5** — tool execution, guided parameters and learning mode. Too
 | [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md) | Scope, requirements, platforms, limitations |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, interfaces, state machine, decisions |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Threats and mitigations |
+| [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) | Phase 6 security review: findings, fixes, tests, residual risks |
 | [docs/TOOL_MANIFEST_SCHEMA.md](docs/TOOL_MANIFEST_SCHEMA.md) | Manifest format |
 | [docs/MANUAL_INTEGRATION_TESTS.md](docs/MANUAL_INTEGRATION_TESTS.md) | Manual Windows tests for WSL, containers and setup |
 
@@ -78,8 +79,8 @@ e2e/              Playwright tests
 ## Tests
 
 ```bash
-npm test                      # 115 frontend tests
-cargo test --manifest-path src-tauri/Cargo.toml     # 245 Rust unit tests (simulated winget/wsl/docker/tool processes, real SQLite, real practice server)
+npm test                      # 117 frontend tests
+cargo test --manifest-path src-tauri/Cargo.toml     # 272 Rust unit and property tests (simulated winget/wsl/docker/tool processes, real SQLite, real practice server)
 npm run test:e2e              # Playwright, demo data
 ```
 

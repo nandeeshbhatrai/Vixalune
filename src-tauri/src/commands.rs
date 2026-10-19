@@ -49,6 +49,8 @@ pub struct AppState {
     pub activity: Arc<dyn ActivityLogger>,
     pub data_dir: PathBuf,
     pub rejected_manifests: Vec<String>,
+    /// Things that happened at start-up the user should know about (for example a damaged database that was replaced).
+    pub startup_notices: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -57,6 +59,7 @@ pub struct AppInfo {
     pub version: &'static str,
     pub data_dir: String,
     pub rejected_manifests: Vec<String>,
+    pub startup_notices: Vec<String>,
 }
 
 fn now() -> String {
@@ -77,6 +80,7 @@ pub fn get_app_info(state: State<'_, AppState>) -> AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         data_dir: state.data_dir.display().to_string(),
         rejected_manifests: state.rejected_manifests.clone(),
+        startup_notices: state.startup_notices.clone(),
     }
 }
 

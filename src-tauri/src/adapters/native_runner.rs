@@ -70,6 +70,18 @@ impl NativeToolRunner {
         Ok(())
     }
 
+    /// Number of runs that are currently active.
+    pub fn active_count(&self) -> usize {
+        self.inner.running.lock().unwrap().len()
+    }
+
+    /// Ask every active run to stop (application shutdown). Returns how many were asked.
+    pub fn cancel_all(&self) -> usize {
+        let running = self.inner.running.lock().unwrap();
+        running.values().for_each(|t| t.cancel());
+        running.len()
+    }
+
     pub async fn wait(&self, op: OperationId, timeout: Duration) -> AppResult<Job> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
@@ -240,7 +252,7 @@ impl ToolRunner for NativeToolRunner {
             WorkingDir::InstallDir => exe.parent().map(|d| d.to_path_buf()).unwrap_or_else(|| run_dir.clone()),
         };
         let spec = CommandSpec { program: exe, args: built.preview.args.clone(), timeout: Duration::from_secs(u64::from(p.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS))) };
-        let opts = ExecOptions { cwd: Some(cwd), env: p.env.iter().map(|e| (e.name.clone(), e.value.clone())).collect() };
+        let opts = ExecOptions { cwd: Some(cwd), env: p.env.iter().map(|e| (e.name.clone(), e.value.clone())).collect(), kill_leftovers: true, max_processes: Some(512) };
 
         let inner = self.inner.clone();
         tokio::spawn(async move {

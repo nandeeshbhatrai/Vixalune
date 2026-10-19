@@ -127,7 +127,9 @@ impl InstallEngine {
 
     async fn start_job(&self, tool: &ToolId, kind: JobKind, allow_elevation: bool) -> AppResult<OperationId> {
         let inner = &self.inner;
-        let manifest = inner.deps.registry.get(tool)?.manifest;
+        let entry = inner.deps.registry.get(tool)?;
+        let provenance = format!("manifest {} sha256:{} ({:?})", entry.manifest.manifest_version, entry.digest.get(..16).unwrap_or("unknown"), entry.trust);
+        let manifest = entry.manifest;
         match kind {
             JobKind::Uninstall if !manifest.lifecycle.can_uninstall => {
                 return Err(AppError::Unsupported(format!("{} cannot be uninstalled by Vixalune", manifest.name)))
@@ -166,6 +168,7 @@ impl InstallEngine {
             inner: inner.clone(),
             job: Arc::new(Mutex::new(job.clone())),
             manifest,
+            provenance: provenance.clone(),
             cancel: handle.cancel.clone(),
             consent: handle.consent.clone(),
             approved: handle.approved.clone(),
@@ -173,7 +176,7 @@ impl InstallEngine {
             touched: AtomicBool::new(false),
         };
         inner.running.lock().unwrap().insert(job.id, handle);
-        inner.audit(ActivityKind::InstallStarted, Some(tool), &format!("{kind:?} requested"));
+        inner.audit(ActivityKind::InstallStarted, Some(tool), &format!("{kind:?} requested; {provenance}"));
         let id = job.id;
         tokio::spawn(async move { run.execute().await });
         Ok(id)
@@ -207,6 +210,8 @@ struct Run {
     inner: Arc<Inner>,
     job: Arc<Mutex<Job>>,
     manifest: ToolManifest,
+    /// Which exact definition drove this job (manifest version, digest prefix, trust level), for the audit log.
+    provenance: String,
     cancel: CancellationToken,
     consent: Arc<Notify>,
     approved: Arc<AtomicBool>,
@@ -472,7 +477,7 @@ impl Run {
                 self.put_record(InstallState::Installed, method, version, report.location.clone(), Some(verification));
                 self.inner.set_detection(self.tool_id(), true);
                 self.transition(JobEvent::VerifyPassed, &format!("Installed and verified. {}", report.detail))?;
-                self.inner.audit(ActivityKind::InstallSucceeded, Some(self.tool_id()), &format!("{} verified ({:?})", self.manifest.name, report.level));
+                self.inner.audit(ActivityKind::InstallSucceeded, Some(self.tool_id()), &format!("{} verified ({:?}); {}", self.manifest.name, report.level, self.provenance));
                 self.inner.audit(ActivityKind::Verified, Some(self.tool_id()), &report.detail);
             }
             outcome => {
@@ -537,7 +542,7 @@ impl Run {
         let _ = self.store().delete_installation(self.tool_id());
         self.inner.set_detection(self.tool_id(), false);
         self.transition(JobEvent::UninstallDone, "Uninstalled")?;
-        self.inner.audit(ActivityKind::Uninstalled, Some(self.tool_id()), &self.manifest.name);
+        self.inner.audit(ActivityKind::Uninstalled, Some(self.tool_id()), &format!("{} removed; {}", self.manifest.name, self.provenance));
         Ok(())
     }
 
@@ -714,7 +719,12 @@ impl InstallEngine {
             return Some(phase_to_state(active.phase, active.kind));
         }
         if let Ok(Some(rec)) = inner.deps.store.get_installation(tool) {
-            return Some(rec.state);
+            // A stored "in progress" state with no active job is a leftover of an interrupted operation (a crash, a restored
+            // backup, a damaged record). Showing it would claim work that is not happening, so it is reported as failed.
+            return Some(match rec.state {
+                InstallState::Queued | InstallState::Downloading | InstallState::Installing | InstallState::Verifying | InstallState::Uninstalling | InstallState::Cancelling => InstallState::Failed,
+                other => other,
+            });
         }
         let last = jobs.iter().find(|j| &j.tool_id == tool);
         if let Some(j) = last {

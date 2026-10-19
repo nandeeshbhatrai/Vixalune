@@ -1,0 +1,117 @@
+tool_id = "nmap"
+title = "Learn Nmap: find out what is listening"
+what_it_does = "Nmap (\"Network Mapper\") connects to a computer and reports which network ports answer, which makes it the standard way to see what a machine exposes. With the right options it can also try to recognise the software behind each open port."
+problem_solved = "You cannot protect or test what you do not know about. Nmap answers the first question of almost every security job: \"what is reachable here?\" It turns a vague worry (\"is anything open?\") into a short, checkable list."
+requirements = [
+  "Nmap installed from the Tool Library (Vixalune installs it with winget).",
+  "A target you own or have written permission to scan. The built-in practice application on this computer is always allowed.",
+  "For the exercise: the practice web application started in Learning Labs.",
+]
+authorization_warning = "Only scan computers and networks you own or have written permission to test. Scanning someone else's systems can be illegal. Vixalune's scope checks are a safety net, not legal permission."
+
+[[first_run]]
+title = "Start the practice application"
+body = "Open Learning Labs and start the Practice web application. It runs only on this computer (127.0.0.1) so scanning it is safe."
+
+[[first_run]]
+title = "Open the Nmap launcher"
+body = "Go to Run a Tool, choose Nmap and pick \"Identify services on chosen ports\". The form is filled with safe defaults that point at the practice application."
+profile = "service-scan"
+
+[[first_run]]
+title = "Read the command before running"
+body = "The preview shows the exact program and arguments Vixalune will run, who it will talk to and whether that is in scope. Nothing runs until you press Run."
+profile = "service-scan"
+
+[[first_run]]
+title = "Run it and watch the output"
+body = "Press Run. Lines appear as Nmap produces them. The run ends by itself; you can stop it at any time with Cancel."
+profile = "service-scan"
+
+[[first_run]]
+title = "Read the result"
+body = "Find the table headed PORT STATE SERVICE. A row whose STATE is open means something accepted the connection. The run is shown as \"finished with findings\" when at least one port was open. That is a result, not an error."
+
+[[parameters]]
+profile = "quick-scan"
+name = "target"
+explanation = "The computer to scan: a name such as localhost or an IP address such as 127.0.0.1. Vixalune checks this against your lab list before running."
+
+[[parameters]]
+profile = "service-scan"
+name = "ports"
+explanation = "Which ports to check, as numbers separated by commas or ranges such as 8000-8100. Fewer ports finish faster and make less noise on the network."
+
+[[parameters]]
+profile = "host-discovery"
+name = "target"
+explanation = "Here a small range in CIDR form is allowed, for example 192.168.56.0/24 (256 addresses). It only checks which addresses answer; it does not scan ports."
+
+[example]
+profile = "service-scan"
+output = '''
+Starting Nmap ...
+Nmap scan report for localhost (127.0.0.1)
+Host is up.
+
+PORT      STATE SERVICE VERSION
+18080/tcp open  http    (software name and version, when Nmap recognises it)
+
+Nmap done: 1 IP address (1 host up) scanned in a few seconds
+'''
+interpretation = [
+  "This is an illustration, not a recording. Wording and details differ by Nmap version and by machine.",
+  "\"Host is up\" means the target answered, so the scan is meaningful.",
+  "PORT is the number and protocol. STATE open means a program is listening and accepted the connection.",
+  "closed means the computer answered but nothing listens there; filtered means no answer at all, often a firewall. With --open, only open ports are listed.",
+  "SERVICE is a guess from the port number unless version detection (-sV) confirmed it.",
+]
+
+[[common_errors]]
+symptom = "nmap.exe was not found"
+cause = "Nmap is not installed, or the installer has not finished."
+fix = "Install Nmap from the Tool Library, wait for the job to succeed, then try again."
+
+[[common_errors]]
+symptom = "Failed to resolve the target name"
+cause = "The host name is misspelled or your computer cannot look it up."
+fix = "Check the spelling, or use the IP address. Vixalune also refuses names it cannot resolve because it cannot tell where they point."
+
+[[common_errors]]
+symptom = "Vixalune says the target is out of scope or asks for confirmation"
+cause = "The target is not on this computer or in your lab list. Private networks need a tick box; public addresses need you to type the host name."
+fix = "Add networks you own to the lab list in Settings, or confirm only if you are authorised to test the target."
+
+[[common_errors]]
+symptom = "Host seems down, or no ports are shown"
+cause = "The host does not exist, blocks the probes, or nothing is open. An empty result is a valid result."
+fix = "Check the address, and remember that firewalls can hide open ports. Try the practice application first to see what a positive result looks like."
+
+[[common_errors]]
+symptom = "The run was stopped after the time limit"
+cause = "Large ranges or slow networks take longer than the profile's limit."
+fix = "Scan fewer ports or a smaller range."
+
+[exercise]
+title = "Find the practice application's open port"
+lab = "practice-web"
+profile = "service-scan"
+goal = "Confirm that the practice web application is listening and see what Nmap learns about it."
+steps = [
+  "Start the Practice web application in Learning Labs and note its port (18080 by default).",
+  "Open Run a Tool, choose Nmap, then \"Identify services on chosen ports\".",
+  "Keep the defaults: target 127.0.0.1 and the lab's port.",
+  "Read the preview, then press Run.",
+  "Find the row for the lab's port and its state.",
+  "Stop the practice application in Learning Labs and run the same scan again.",
+]
+expected = "While the lab is running its port is listed as open. After you stop it, the port is no longer listed as open (the scan reports it as closed or shows no open ports). The difference between the two runs is exactly what Nmap is for."
+stretch = "Run \"Find live hosts\" against 127.0.0.1 and compare it with the port scan. One tells you a host is up; the other tells you what it exposes."
+
+[[links]]
+label = "Nmap reference guide (official)"
+url = "https://nmap.org/book/man.html"
+
+[[links]]
+label = "Nmap home page"
+url = "https://nmap.org"

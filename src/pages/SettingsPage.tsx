@@ -1,5 +1,6 @@
 import { AsyncView } from "@/components/AsyncView";
 import { PageHeader } from "@/components/PageHeader";
+import { ScopeAndRetention } from "@/components/settings/ScopeAndRetention";
 import { Card, CardTitle } from "@/components/ui/card";
 import { useAsync } from "@/hooks/useAsync";
 import { useTheme, type ThemeChoice } from "@/hooks/useTheme";
@@ -33,6 +34,7 @@ export function SettingsPage() {
           </div>
         </fieldset>
       </Card>
+      <ScopeAndRetention />
       <Card>
         <CardTitle>About this installation</CardTitle>
         <AsyncView state={info} retry={retry} label="Loading app info">

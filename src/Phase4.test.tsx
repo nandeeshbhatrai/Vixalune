@@ -200,82 +200,84 @@ describe("blocked and unknown readiness on the dashboard", () => {
   });
 });
 
-describe("launching container tools", () => {
+describe("launching container tools from Run a Tool", () => {
   const installed = (id: string) =>
     backendWith({ listToolStates: async () => [{ tool_id: id, state: "installed" satisfies InstallState }] });
 
-  async function openLaunch(backend: Backend, id = "semgrep") {
-    renderApp(`/catalog/${id}`, backend);
-    await waitFor(async () => expect(await screen.findByRole("button", { name: "Launch" })).toBeEnabled());
-    await userEvent.click(screen.getByRole("button", { name: "Launch" }));
-    return screen.findByRole("dialog", { name: /Launch/ });
+  async function openRun(backend: Backend, profile: string, id = "semgrep") {
+    renderApp(`/run/${id}?profile=${profile}`, backend);
+    return screen.findByRole("button", { name: "Review what will run" });
   }
 
   it("blocks Launch with a reason for tools that have no launch profile", async () => {
-    renderApp("/catalog/nmap", installed("nmap"));
+    renderApp("/catalog/wireshark", installed("wireshark"));
     const launch = await screen.findByRole("button", { name: "Launch" });
     expect(launch).toBeDisabled();
     expect(screen.getByText(/no launch profile yet/)).toBeInTheDocument();
   });
 
+  it("the Launch button on a tool page opens Run a Tool for that tool", async () => {
+    renderApp("/catalog/semgrep", installed("semgrep"));
+    await waitFor(async () => expect(await screen.findByRole("button", { name: "Launch" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Launch" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Run a Tool" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Review what will run" })).toBeInTheDocument();
+  });
+
   it("requires a reviewed preview and an explicit approval before running, and shows what will run", async () => {
     const previewLaunch = vi.fn(createDemoBackend().previewLaunch);
     const launchTool = vi.fn(async () => "job-9");
-    const dialog = await openLaunch({ ...installed("semgrep"), previewLaunch, launchTool });
-    const run = within(dialog).getByRole("button", { name: "Run" });
-    expect(run).toBeDisabled();
-    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "scan-local");
+    const reviewButton = await openRun({ ...installed("semgrep"), previewLaunch, launchTool }, "scan-local");
+    const run = () => screen.queryByRole("button", { name: "Run" });
+    expect(run()).not.toBeInTheDocument();
     // No folder yet: the review is refused with an actionable message.
-    await userEvent.click(within(dialog).getByRole("button", { name: "Review what will run" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("choose and approve a folder");
-    await userEvent.type(within(dialog).getByLabelText("Folder for source"), "D:\\labs\\app");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Review what will run" }));
-    const summary = await within(dialog).findByLabelText("What will run");
+    await userEvent.click(reviewButton);
+    expect(await screen.findByRole("alert")).toHaveTextContent("choose and approve a folder");
+    await userEvent.type(screen.getByLabelText("Folder for source"), "D:\labs\app");
+    await userEvent.click(screen.getByRole("button", { name: "Review what will run" }));
+    const summary = await screen.findByLabelText("What will run");
     expect(summary).toHaveTextContent("none (no internet access)");
-    expect(summary).toHaveTextContent("D:\\labs\\app → /src (read-only)");
+    expect(summary).toHaveTextContent("D:\labs\app → /src (read-only)");
     expect(summary).toHaveTextContent("non-root user 65532:65532");
-    expect(within(dialog).getByRole("button", { name: "Run" })).toBeDisabled();
-    await userEvent.click(within(dialog).getByRole("checkbox", { name: /approve exactly what is listed/ }));
-    expect(within(dialog).getByRole("button", { name: "Run" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: /reviewed the command and target/ }));
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
     // Editing anything invalidates the review and the approval.
-    await userEvent.type(within(dialog).getByLabelText("Folder for source"), "x");
-    expect(within(dialog).queryByLabelText("What will run")).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Run" })).toBeDisabled();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Review what will run" }));
-    await within(dialog).findByLabelText("What will run");
-    await userEvent.click(within(dialog).getByRole("checkbox", { name: /approve exactly/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Run" }));
+    await userEvent.type(screen.getByLabelText("Folder for source"), "x");
+    expect(screen.queryByLabelText("What will run")).not.toBeInTheDocument();
+    expect(run()).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review what will run" }));
+    await screen.findByLabelText("What will run");
+    await userEvent.click(screen.getByRole("checkbox", { name: /reviewed the command and target/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Run" }));
     await waitFor(() => expect(launchTool).toHaveBeenCalledTimes(1));
-    expect(launchTool).toHaveBeenCalledWith("semgrep", "scan-local", expect.objectContaining({ config: "/src/.semgrep.yml" }), { network: false, mounts: { source: "D:\\labs\\appx" }, ports: {} });
-    expect(await screen.findByText(/Output is shown under Running Jobs/)).toBeInTheDocument();
+    expect(launchTool).toHaveBeenCalledWith("semgrep", "scan-local", expect.objectContaining({ config: "/src/.semgrep.yml" }), { network: false, mounts: { source: "D:\labs\appx" }, ports: {}, scope: null });
   });
 
   it("requires explicit network approval for profiles that need the internet and flags it", async () => {
     const launchTool = vi.fn(async () => "job-9");
-    const dialog = await openLaunch({ ...installed("semgrep"), launchTool });
-    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "scan-registry-rules");
-    await userEvent.type(within(dialog).getByLabelText("Folder for source"), "D:\\labs\\app");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Review what will run" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("network access");
-    await userEvent.click(within(dialog).getByRole("checkbox", { name: /Allow this run to use the network/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Review what will run" }));
-    const summary = await within(dialog).findByLabelText("What will run");
+    const reviewButton = await openRun({ ...installed("semgrep"), launchTool }, "scan-registry-rules");
+    await userEvent.type(screen.getByLabelText("Folder for source"), "D:\labs\app");
+    await userEvent.click(reviewButton);
+    expect(await screen.findByRole("alert")).toHaveTextContent("network access");
+    await userEvent.click(screen.getByRole("checkbox", { name: /Allow this run to use the network/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Review what will run" }));
+    const summary = await screen.findByLabelText("What will run");
     expect(summary).toHaveTextContent("ALLOWED");
-    expect(within(dialog).getByRole("note")).toHaveTextContent("reach the internet");
-    await userEvent.click(within(dialog).getByRole("checkbox", { name: /approve exactly/ }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Run" }));
-    await waitFor(() => expect(launchTool).toHaveBeenCalledWith("semgrep", "scan-registry-rules", {}, { network: true, mounts: { source: "D:\\labs\\app" }, ports: {} }));
+    expect(within(summary).getByText(/reach the internet/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: /reviewed the command and target/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => expect(launchTool).toHaveBeenCalledWith("semgrep", "scan-registry-rules", {}, { network: true, mounts: { source: "D:\labs\app" }, ports: {}, scope: null }));
   });
 
   it("shows backend errors (for example a refused folder) without starting anything", async () => {
     const launchTool = vi.fn(async () => "x");
-    const previewLaunch = vi.fn(() => Promise.reject({ code: "validation", message: "validation failed: 'C:\\Windows' is a protected system folder and cannot be mounted", recovery: "Correct the highlighted value and try again." }));
-    const dialog = await openLaunch({ ...installed("semgrep"), previewLaunch, launchTool });
-    await userEvent.selectOptions(within(dialog).getByRole("combobox"), "scan-local");
-    await userEvent.type(within(dialog).getByLabelText("Folder for source"), "C:\\Windows");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Review what will run" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("protected system folder");
-    expect(within(dialog).getByRole("button", { name: "Run" })).toBeDisabled();
+    const previewLaunch = vi.fn(() => Promise.reject({ code: "validation", message: "validation failed: 'C:\Windows' is a protected system folder and cannot be mounted", recovery: "Correct the highlighted value and try again." }));
+    const reviewButton = await openRun({ ...installed("semgrep"), previewLaunch, launchTool }, "scan-local");
+    await userEvent.type(screen.getByLabelText("Folder for source"), "C:\Windows");
+    await userEvent.click(reviewButton);
+    expect(await screen.findByRole("alert")).toHaveTextContent("protected system folder");
+    expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
     expect(launchTool).not.toHaveBeenCalled();
   });
 });

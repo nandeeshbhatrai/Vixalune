@@ -1,4 +1,4 @@
-﻿//! Application-layer interfaces ("ports"). The UI/command layer depends only on these traits;
+//! Application-layer interfaces ("ports"). The UI/command layer depends only on these traits;
 //! platform adapters and storage implement them. Everything is `Send + Sync` so
 //! implementations can be shared as `Arc<dyn Trait>` (constructor injection).
 
@@ -11,6 +11,9 @@ use crate::domain::jobs::{
 use crate::domain::container::{RunApprovals, RunSummary};
 use crate::domain::lab::{LabDefinition, LabState};
 use crate::domain::platform::{PlatformReport, SetupActionId};
+use crate::domain::runs::{OutputRow, PurgeReport, RunRecord};
+use crate::domain::scope::ScopeReport;
+use crate::domain::settings::UserSettings;
 use crate::domain::manifest::{CommandPreview, InstallMethod, InstallSpec, ParamValue, ToolManifest};
 use crate::domain::process::{CancellationToken, InstallPlan, OutputSink, OutputStream, ProcessSpec, ProcessStatus};
 use crate::domain::{AppResult, LabId, OperationId, ProcessId, ToolId};
@@ -147,11 +150,24 @@ pub trait LineSink: Send + Sync {
     fn line(&self, stream: OutputStream, text: &str);
 }
 
+/// Optional per-run settings: working directory and extra, fixed (non-secret) environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExecOptions {
+    pub cwd: Option<PathBuf>,
+    pub env: Vec<(String, String)>,
+}
+
 #[async_trait]
 pub trait CommandExecutor: Send + Sync {
     /// Runs to completion, streaming lines to `sink`. Kills the process tree on timeout or when
     /// `cancel` is triggered. Returns `Err` only if the process could not be started.
     async fn run(&self, spec: CommandSpec, sink: &dyn LineSink, cancel: &CancellationToken) -> AppResult<CommandResult>;
+
+    /// Like `run`, with a working directory and extra environment. The default ignores the options;
+    /// real executors override it.
+    async fn run_in(&self, spec: CommandSpec, _opts: ExecOptions, sink: &dyn LineSink, cancel: &CancellationToken) -> AppResult<CommandResult> {
+        self.run(spec, sink, cancel).await
+    }
 }
 
 /// Finds executables using a freshly read system PATH plus explicit extra folders.
@@ -228,6 +244,8 @@ pub trait JobStore: Send + Sync {
     fn active_job_for(&self, tool: &ToolId) -> AppResult<Option<Job>>;
     fn append_output(&self, id: OperationId, stream: OutputStream, text: &str) -> AppResult<()>;
     fn job_output(&self, id: OperationId, limit: usize) -> AppResult<Vec<String>>;
+    /// Output rows after sequence number `after` (0 = from the start), with their stream, oldest first.
+    fn output_since(&self, id: OperationId, after: i64, limit: usize) -> AppResult<Vec<OutputRow>>;
     /// After a restart: every job still marked active was interrupted. Marks them failed and returns them.
     fn interrupt_active(&self, now: &str) -> AppResult<Vec<Job>>;
     fn put_installation(&self, record: &InstallationRecord) -> AppResult<()>;
@@ -273,14 +291,61 @@ pub struct RunPreview {
     pub command: CommandPreview,
     /// Present for container profiles: image, user, network, mounts, ports, limits, warnings.
     pub container: Option<RunSummary>,
+    /// Who the run would talk to, and whether that is in scope. Present when the profile has network targets.
+    pub scope: Option<ScopeReport>,
+    pub network_activity: crate::domain::manifest::NetworkActivity,
+    pub timeout_secs: u32,
+    pub output_format: crate::domain::manifest::OutputFormat,
+    pub expected_output: String,
+    /// Where the run starts and may write result files.
+    pub working_dir: String,
+    /// Plain-language reminders (privileges, limits of the scope check, ...).
+    pub notes: Vec<String>,
 }
 
 #[async_trait]
 pub trait ToolRunner: Send + Sync {
-    /// Validate parameters and approvals and describe the exact run without starting it.
-    fn preview(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<RunPreview>;
+    /// Validate parameters, approvals and scope, and describe the exact run without starting it.
+    /// Touches the network only to resolve host names (and, for plain http URLs already in scope, to follow redirects).
+    async fn preview(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<RunPreview>;
     /// Start the run as a tracked job (output, state and cancellation go through the job system).
     async fn start(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<OperationId>;
+}
+
+/// Durable run history (one record per launch), kept separately from raw output so output can expire sooner.
+pub trait RunHistory: Send + Sync {
+    fn put_run(&self, run: &RunRecord) -> AppResult<()>;
+    fn get_run(&self, id: OperationId) -> AppResult<RunRecord>;
+    fn list_runs(&self, limit: usize) -> AppResult<Vec<RunRecord>>;
+    fn set_result_path(&self, id: OperationId, path: &str) -> AppResult<()>;
+    /// Delete history older than `history_before` and stored output older than `output_before` (RFC 3339).
+    fn purge(&self, history_before: &str, output_before: &str) -> AppResult<PurgeReport>;
+}
+
+/// Current user settings (lab allow-list, retention). Read on every run so changes apply immediately.
+pub trait SettingsProvider: Send + Sync {
+    fn get(&self) -> UserSettings;
+    fn update(&self, settings: UserSettings) -> AppResult<()>;
+}
+
+/// Values for `{lab:...}` placeholders in profile defaults.
+pub trait LabInfo: Send + Sync {
+    fn placeholders(&self) -> HashMap<String, String>;
+}
+
+/// One plain `HEAD` request to learn where a URL redirects. Never follows the redirect itself: the caller
+/// decides, hop by hop, whether the next destination is in scope.
+#[async_trait]
+pub trait RedirectProbe: Send + Sync {
+    /// `Ok(Some(location))` for a redirect; `Ok(None)` if the response is not a redirect or cannot be read.
+    async fn head(&self, url: &str) -> AppResult<Option<String>>;
+}
+
+/// Where a user-chosen save location comes from and where bytes go. The webview never supplies a path.
+#[async_trait]
+pub trait ResultSaver: Send + Sync {
+    /// Ask the user for a file name (native dialog) and write `content`. `Ok(None)` if they cancelled.
+    async fn save(&self, suggested_name: &str, content: &str) -> AppResult<Option<String>>;
 }
 
 // ------------------------------------------------------------------ labs
@@ -307,6 +372,8 @@ pub trait JobRegistry: Send + Sync {
 /// the URL always comes from a validated manifest, never from the UI.
 pub trait LinkOpener: Send + Sync {
     fn open(&self, url: &str) -> AppResult<()>;
+    /// Show an existing folder in Windows Explorer. The caller passes a path it produced itself, never one from the UI.
+    fn open_folder(&self, path: &std::path::Path) -> AppResult<()>;
 }
 
 // ------------------------------------------------------------------ activity
@@ -318,3 +385,11 @@ pub trait ActivityLogger: Send + Sync {
 }
 
 
+
+
+// ------------------------------------------------------------------ learning
+
+pub trait LearningCatalog: Send + Sync {
+    fn list(&self) -> Vec<crate::domain::learning::Tutorial>;
+    fn get(&self, id: &ToolId) -> AppResult<crate::domain::learning::Tutorial>;
+}

@@ -11,7 +11,9 @@ use crate::domain::activity::{ActivityEvent, ActivityKind};
 use crate::domain::container::{build_docker_run, container_name, validate_host_mount, DockerRun, RunApprovals};
 use crate::domain::jobs::{Job, JobError, JobEvent, JobKind, JobPhase};
 use crate::domain::manifest::{build_command, InstallSpec, ParamValue, RunSpec, RuntimeKind, ToolManifest};
+use crate::adapters::run_support::RunSupport;
 use crate::domain::process::{CancellationToken, OutputStream};
+use crate::domain::runs::{classify_outcome, RunOutcome, RunRecord};
 use crate::domain::{AppError, AppResult, OperationId, ToolId};
 use crate::ports::{
     ActivityLogger, AdapterContext, CommandExecutor, CommandOutcome, CommandSpec, ExecutableLocator, InstallerAdapter, JobStore, LineSink, PresenceStatus,
@@ -23,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const RUN_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
+const RUN_TIMEOUT_SECS: u32 = 2 * 60 * 60;
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ContainerToolRunner {
@@ -40,6 +42,8 @@ struct Inner {
     approved_registries: Vec<String>,
     home: Option<PathBuf>,
     running: Mutex<HashMap<OperationId, CancellationToken>>,
+    /// Run history and lab placeholders. Optional so the engine-level tests can use the runner on its own.
+    support: Option<Arc<RunSupport>>,
 }
 
 fn now() -> String {
@@ -85,7 +89,13 @@ impl ContainerToolRunner {
         approved_registries: Vec<String>,
         home: Option<PathBuf>,
     ) -> Self {
-        Self { inner: Arc::new(Inner { registry, executor, locator, adapter, store, activity, approved_registries, home, running: Mutex::new(HashMap::new()) }) }
+        Self { inner: Arc::new(Inner { registry, executor, locator, adapter, store, activity, approved_registries, home, running: Mutex::new(HashMap::new()), support: None }) }
+    }
+
+    /// Attach run history and lab placeholders (call right after `new`).
+    pub fn with_support(mut self, support: Arc<RunSupport>) -> Self {
+        Arc::get_mut(&mut self.inner).expect("the runner is not shared yet").support = Some(support);
+        self
     }
 
     /// Cancel a running container job. `NotFound` if this runner does not own it.
@@ -123,7 +133,10 @@ impl Inner {
     }
 
     fn plan(&self, m: &ToolManifest, p: &RunSpec, spec: &InstallSpec, values: &HashMap<String, ParamValue>, approvals: &RunApprovals, name: &str) -> AppResult<(crate::domain::manifest::CommandPreview, DockerRun)> {
-        let cmd = build_command(p, values)?;
+        let cmd = match &self.support {
+            Some(s) => s.build(p, values, &s.run_dir(OperationId::new()))?.preview,
+            None => build_command(p, values)?,
+        };
         let img = image_for(m, spec, &self.approved_registries)?;
         let run = build_docker_run(m, p, &cmd.args, &img.reference(), approvals, name, self.home.as_deref())?;
         Ok((cmd, run))
@@ -158,11 +171,21 @@ impl LineSink for NullSink {
 
 #[async_trait]
 impl ToolRunner for ContainerToolRunner {
-    fn preview(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<RunPreview> {
+    async fn preview(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<RunPreview> {
         let (m, p, spec) = self.inner.resolve(id, profile)?;
         // Lexical validation only: previewing must not touch the file system or the engine.
         let (command, run) = self.inner.plan(&m, &p, &spec, values, approvals, "vixalune-preview")?;
-        Ok(RunPreview { command, container: Some(run.summary) })
+        Ok(RunPreview {
+            command,
+            container: Some(run.summary),
+            scope: None,
+            network_activity: p.network_activity.clone(),
+            timeout_secs: p.timeout_secs.unwrap_or(600),
+            output_format: p.output_format.clone(),
+            expected_output: p.expected_output.clone(),
+            working_dir: "container".into(),
+            notes: vec![],
+        })
     }
 
     async fn start(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<OperationId> {
@@ -207,33 +230,61 @@ impl ToolRunner for ContainerToolRunner {
         inner.store.create_job(&job)?; // Busy if the tool is installing or already running.
         inner.running.lock().unwrap().insert(job.id, cancel.clone());
         inner.audit(ActivityKind::RunStarted, id, &format!("{} profile '{}' (network: {}, mounts: {}, ports: {})", m.name, p.id, run.summary.network, run.summary.mounts.len(), run.summary.ports.len()));
+        if let Some(s) = &inner.support {
+            s.record_start(&RunRecord {
+                id: job.id,
+                tool_id: id.clone(),
+                tool_name: m.name.clone(),
+                profile_id: p.id.clone(),
+                profile_label: p.label.clone(),
+                tool_version: inner.store.get_installation(id).ok().flatten().and_then(|r| r.version),
+                started_at: job.started_at.clone(),
+                finished_at: None,
+                duration_ms: None,
+                exit_code: None,
+                outcome: None,
+                command: crate::domain::activity::redact(&cmd.display),
+                targets: vec![],
+                scope: if run.summary.network == "none" { "no network access".into() } else { "network access approved by you".into() },
+                network_activity: p.network_activity,
+                output_format: p.output_format,
+                run_dir: None,
+                result_path: None,
+            });
+        }
 
         let inner = self.inner.clone();
         let op = job.id;
         let display = cmd.display.clone();
+        let timeout = Duration::from_secs(u64::from(p.timeout_secs.unwrap_or(RUN_TIMEOUT_SECS)));
         tokio::spawn(async move {
             let sink = JobSink { store: inner.store.clone(), id: op };
+            let mut finished: (Option<i32>, RunOutcome) = (None, RunOutcome::Failed);
             let finish = async {
                 inner.step(&mut job, JobEvent::StartChecks, "Starting")?;
                 inner.step(&mut job, JobEvent::BeginRun, &format!("Running {display} in a container"))?;
                 let _ = inner.store.append_output(op, OutputStream::Stdout, &format!("> docker {}", run.args.join(" ")));
-                let r = inner.executor.run(CommandSpec { program: docker_exe.clone(), args: run.args.clone(), timeout: RUN_TIMEOUT }, &sink, &cancel).await?;
+                let r = inner.executor.run(CommandSpec { program: docker_exe.clone(), args: run.args.clone(), timeout }, &sink, &cancel).await?;
                 match r.outcome {
-                    CommandOutcome::Exited(0) => {
-                        job.exit_code = Some(0);
-                        inner.step(&mut job, JobEvent::RunDone, "Finished")?;
-                        inner.audit(ActivityKind::RunFinished, &job.tool_id, "exit code 0");
-                    }
                     CommandOutcome::Exited(code) => {
-                        let e = AppError::CommandFailed { code: Some(code), message: format!("the tool exited with code {code}") };
+                        let output = inner.store.job_output(op, 100_000).map(|l| l.join("\n")).unwrap_or_default();
+                        let outcome = classify_outcome(Some(code), false, false, &p.exit_codes, &p.findings_patterns, &output).unwrap_or(RunOutcome::Failed);
+                        finished = (Some(code), outcome);
                         job.exit_code = Some(code);
-                        job.error = Some(JobError::from_app(&e, Some(r.tail.iter().rev().take(6).rev().cloned().collect::<Vec<_>>().join(" | "))));
-                        inner.step(&mut job, JobEvent::Fail, &e.to_string())?;
-                        inner.audit(ActivityKind::RunFinished, &job.tool_id, &format!("exit code {code}"));
+                        if outcome.is_success() {
+                            inner.step(&mut job, JobEvent::RunDone, if outcome == RunOutcome::Findings { "Finished: the tool reported findings" } else { "Finished: nothing reported" })?;
+                            inner.audit(ActivityKind::RunFinished, &job.tool_id, &format!("{outcome:?}, exit code {code}"));
+                        } else {
+                            let e = AppError::CommandFailed { code: Some(code), message: format!("the tool exited with code {code}, which this profile does not treat as success") };
+                            job.error = Some(JobError::from_app(&e, Some(r.tail.iter().rev().take(6).rev().cloned().collect::<Vec<_>>().join(" | "))));
+                            inner.step(&mut job, JobEvent::Fail, &e.to_string())?;
+                            inner.audit(ActivityKind::RunFinished, &job.tool_id, &format!("exit code {code}"));
+                        }
                     }
                     CommandOutcome::TimedOut => {
+                        finished = (None, RunOutcome::TimedOut);
                         inner.remove_container(&docker_exe, &run.container_name).await;
-                        let e = AppError::TimedOut(format!("the run exceeded {} minutes and was stopped", RUN_TIMEOUT.as_secs() / 60));
+                        let e = AppError::TimedOut(format!("the run exceeded {} seconds and was stopped", timeout.as_secs()));
                         job.error = Some(JobError::from_app(&e, None));
                         inner.step(&mut job, JobEvent::Fail, &e.to_string())?;
                         inner.audit(ActivityKind::RunTerminated, &job.tool_id, "timed out");
@@ -245,6 +296,7 @@ impl ToolRunner for ContainerToolRunner {
             if let Err(e) = finish.await {
                 match e {
                     AppError::Cancelled => {
+                        finished = (None, RunOutcome::Cancelled);
                         // Killing the docker client does not stop the container: remove it by name.
                         inner.remove_container(&docker_exe, &run.container_name).await;
                         let _ = inner.step(&mut job, JobEvent::RequestCancel, "Cancelling");
@@ -261,6 +313,9 @@ impl ToolRunner for ContainerToolRunner {
                         inner.audit(ActivityKind::RunTerminated, &job.tool_id, other.code());
                     }
                 }
+            }
+            if let Some(s) = &inner.support {
+                s.record_finish(op, finished.0, finished.1);
             }
             inner.running.lock().unwrap().remove(&op);
         });
@@ -334,7 +389,7 @@ mod tests {
     }
 
     fn approvals(path: &Path, network: bool) -> RunApprovals {
-        RunApprovals { network, mounts: HashMap::from([("source".to_string(), path.display().to_string())]), ports: HashMap::new() }
+        RunApprovals { network, mounts: HashMap::from([("source".to_string(), path.display().to_string())]), ports: HashMap::new(), scope: None }
     }
 
     const WAIT: Duration = Duration::from_secs(10);
@@ -342,7 +397,7 @@ mod tests {
     #[tokio::test]
     async fn preview_shows_exactly_what_will_run_without_touching_the_engine() {
         let f = fixture(true, Step::ok(&[]));
-        let pv = f.runner.preview(&semgrep(), "scan-registry-rules", &HashMap::new(), &approvals(&f.sandbox, true)).unwrap();
+        let pv = f.runner.preview(&semgrep(), "scan-registry-rules", &HashMap::new(), &approvals(&f.sandbox, true)).await.unwrap();
         let c = pv.container.unwrap();
         assert_eq!(c.network, "bridge");
         assert!(c.mounts[0].read_only && c.mounts[0].container == "/src");
@@ -351,7 +406,7 @@ mod tests {
         assert!(pv.command.display.starts_with("semgrep scan --config p/default"));
         assert!(f.exec.calls().is_empty());
         // Not approving the network is refused at preview time.
-        assert!(f.runner.preview(&semgrep(), "scan-registry-rules", &HashMap::new(), &approvals(&f.sandbox, false)).is_err());
+        assert!(f.runner.preview(&semgrep(), "scan-registry-rules", &HashMap::new(), &approvals(&f.sandbox, false)).await.is_err());
     }
 
     #[tokio::test]
@@ -382,7 +437,7 @@ mod tests {
 
         let f = fixture(true, Step::ok(&[]));
         for evil in ["C:\\", "C:\\Windows\\System32", "C:\\Users", "\\\\server\\share", "D:\\does\\not\\exist"] {
-            let a = RunApprovals { network: true, mounts: HashMap::from([("source".to_string(), evil.to_string())]), ports: HashMap::new() };
+            let a = RunApprovals { network: true, mounts: HashMap::from([("source".to_string(), evil.to_string())]), ports: HashMap::new(), scope: None };
             assert!(f.runner.start(&semgrep(), "scan-registry-rules", &HashMap::new(), &a).await.is_err(), "{evil}");
         }
         assert!(f.runner.start(&semgrep(), "scan-registry-rules", &HashMap::new(), &approvals(&f.sandbox, false)).await.is_err(), "network not approved");
@@ -431,10 +486,10 @@ mod tests {
         assert!(f.runner.cancel(op).await.is_err());
     }
 
-    #[test]
-    fn only_container_profiles_can_be_launched_for_now() {
+    #[tokio::test]
+    async fn only_container_profiles_can_be_launched_for_now() {
         let f = fixture(true, Step::ok(&[]));
         let nmap = ToolId::new("nmap").unwrap();
-        assert!(matches!(f.runner.preview(&nmap, "scan", &HashMap::new(), &RunApprovals::default()), Err(AppError::NotFound(_))));
+        assert!(matches!(f.runner.preview(&nmap, "scan", &HashMap::new(), &RunApprovals::default()).await, Err(AppError::NotFound(_))));
     }
 }

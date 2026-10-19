@@ -28,9 +28,16 @@ export type Architecture = "x64" | "arm64";
 
 export type ParamValue = boolean | number | string;
 
+export type PathKind = "file" | "directory";
+
 export type ParamKind =
   | { type: "text"; max_len?: number | null }
   | { type: "host" }
+  | { type: "ip" }
+  | { type: "url" }
+  | { type: "port" }
+  | { type: "port_list"; max_items?: number | null }
+  | { type: "path"; path_kind: PathKind; must_exist?: boolean; extensions?: string[] }
   | { type: "integer"; min: number; max: number }
   | { type: "boolean" }
   | { type: "choice"; options: string[] };
@@ -63,6 +70,9 @@ export type VerifyCheck =
       expect_output_contains?: string | null;
     };
 
+export type OutputFormat = "text" | "json" | "xml" | "html" | "sarif";
+export type NetworkActivity = "none" | "probes_targets" | "downloads_data";
+
 export interface RunSpec {
   id: string;
   label: string;
@@ -74,6 +84,13 @@ export interface RunSpec {
   mounts: string[];
   needs_network: boolean;
   ports: number[];
+  working_dir?: "run_dir" | "install_dir";
+  timeout_secs?: number | null;
+  output_format?: OutputFormat;
+  network_activity?: NetworkActivity;
+  exit_codes?: { ok: number[]; findings: number[] };
+  expected_output?: string;
+  suggested_mounts?: { name: string; value: string }[];
 }
 
 export interface ContainerPolicy {
@@ -244,14 +261,6 @@ export interface InstallPlan {
   notes: string[];
   unsupported_reason?: string | null;
 }
-export interface LabDefinition {
-  id: string;
-  name: string;
-  description: string;
-  image: string;
-  digest: string;
-  ports: { container: number; host: number }[];
-}
 
 export type LinkKind = "homepage" | "documentation" | "source_repository";
 
@@ -382,12 +391,21 @@ export interface PlatformReport {
 
 // ---------------------------------------------------------------- container launch
 
+export interface ScopeAck {
+  acknowledged: boolean;
+  typed?: string | null;
+  /** The addresses the user saw when confirming. They must still match at run time. */
+  addresses: string[];
+}
+
 export interface RunApprovals {
   network: boolean;
   /** mount name -> host folder */
   mounts: Record<string, string>;
   /** container port -> host port */
-  ports: Record<number, number>;
+  ports: Record<number, string | number>;
+  /** Confirmation for targets outside the lab. */
+  scope?: ScopeAck | null;
 }
 
 export interface RunSummary {
@@ -402,8 +420,117 @@ export interface RunSummary {
   warnings: string[];
 }
 
+export type Locality = "loopback" | "lab" | "private_network" | "public" | "unspecified" | "special" | "unresolvable";
+export type Verdict = "allowed" | "needs_confirmation" | "blocked";
+
+export interface TargetAssessment {
+  parameter: string;
+  raw: string;
+  canonical: string;
+  form: "host" | "ip" | "url";
+  addresses: string[];
+  locality: Locality;
+  verdict: Verdict;
+  reasons: string[];
+}
+
+export interface ScopeReport {
+  targets: TargetAssessment[];
+  verdict: Verdict;
+  confirmation?: { level: "acknowledge" | "type_target"; phrase?: string | null } | null;
+  blocked_reasons: string[];
+  redirects: { from: string; to: string; locality: Locality }[];
+  lab_targets: string[];
+}
+
 export interface RunPreview {
   command: { runtime: RuntimeKind; program: string; args: string[]; display: string };
   container?: RunSummary | null;
+  scope?: ScopeReport | null;
+  network_activity: NetworkActivity;
+  timeout_secs: number;
+  output_format: OutputFormat;
+  expected_output: string;
+  working_dir: string;
+  notes: string[];
+}
+
+export type RunOutcome = "clean" | "findings" | "failed" | "timed_out" | "cancelled";
+
+export interface RunRecord {
+  id: string;
+  tool_id: string;
+  tool_name: string;
+  profile_id: string;
+  profile_label: string;
+  tool_version?: string | null;
+  started_at: string;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  exit_code?: number | null;
+  /** null while the run is still going */
+  outcome?: RunOutcome | null;
+  command: string;
+  targets: string[];
+  scope: string;
+  network_activity: NetworkActivity;
+  output_format: OutputFormat;
+  run_dir?: string | null;
+  result_path?: string | null;
+}
+
+export interface OutputRow {
+  seq: number;
+  stream: "stdout" | "stderr";
+  text: string;
+}
+
+export interface LaunchDefaults {
+  parameters: Record<string, ParamValue>;
+  mounts: Record<string, string>;
+}
+
+export interface UserSettings {
+  scope: { lab_targets: string[] };
+  retention: { history_days: number; output_days: number };
+}
+
+export interface PurgeReport {
+  runs_deleted: number;
+  output_lines_deleted: number;
+  jobs_deleted: number;
+}
+
+// ---------------------------------------------------------------- learning
+
+export type LabKind = "web_app" | "sample_project";
+export type LabState = "stopped" | "starting" | "running" | "stopping" | "failed";
+
+export interface LabDefinition {
+  id: string;
+  name: string;
+  description: string;
+  kind: LabKind;
+  address?: string | null;
+  folder?: string | null;
+  weaknesses: string[];
+  warning: string;
+}
+
+export type LabStatus = LabDefinition & { state: LabState };
+
+export interface Tutorial {
+  tool_id: string;
+  title: string;
+  what_it_does: string;
+  problem_solved: string;
+  requirements: string[];
+  authorization_warning: string;
+  first_run: { title: string; body: string; profile?: string | null }[];
+  parameters: { profile: string; name: string; explanation: string }[];
+  example: { profile: string; output: string; interpretation: string[] };
+  common_errors: { symptom: string; cause: string; fix: string }[];
+  exercise: { title: string; lab: string; profile: string; goal: string; steps: string[]; expected: string; stretch?: string | null };
+  links: { label: string; url: string }[];
 }
 

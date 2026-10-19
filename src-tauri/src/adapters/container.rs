@@ -98,6 +98,16 @@ fn synthetic_profile(executable: &str, args: &[String]) -> RunSpec {
         mounts: vec![],
         needs_network: false,
         ports: vec![],
+        working_dir: Default::default(),
+        timeout_secs: None,
+        output_format: Default::default(),
+        network_activity: Default::default(),
+        exit_codes: Default::default(),
+        findings_patterns: vec![],
+        env: vec![],
+        expected_output: String::new(),
+        locations: vec![],
+        suggested_mounts: vec![],
     }
 }
 
@@ -515,4 +525,7 @@ mod tests {
         assert!(valid_container_id("0123456789ab") && !valid_container_id("abc") && !valid_container_id("0123456789ab; ls"));
     }
 }
+
+
+
 

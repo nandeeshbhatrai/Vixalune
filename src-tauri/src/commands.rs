@@ -3,14 +3,21 @@
 use crate::domain::activity::{ActivityEvent, ActivityKind};
 use crate::domain::environment::EnvironmentReport;
 use crate::domain::jobs::{Capabilities, InstalledTool, Job, LinkKind, ToolStateEntry};
-use crate::domain::lab::LabDefinition;
+use crate::domain::lab::{LabState, LabStatus};
+use crate::domain::learning::Tutorial;
+use crate::domain::runs::{LaunchDefaults, OutputRow, PurgeReport, RunRecord};
+use crate::domain::settings::UserSettings;
+use crate::domain::LabId;
+use crate::adapters::launch_router::LaunchRouter;
+use crate::adapters::result_saver::suggested_file_name;
+use crate::adapters::run_support::RunSupport;
 use crate::domain::container::RunApprovals;
 use crate::domain::manifest::ParamValue;
 use crate::domain::platform::{PlatformReport, SetupActionId};
 use crate::domain::process::InstallPlan;
 use crate::domain::{AppError, AppResult, OperationId, ToolId};
 use crate::ports::{
-    ActivityLogger, CatalogEntry, DependencyResolver, EnvironmentDetector, InstallationManager, JobRegistry, LabManager,
+    ActivityLogger, CatalogEntry, DependencyResolver, EnvironmentDetector, InstallationManager, JobRegistry, JobStore, LabManager, LearningCatalog, ResultSaver, RunHistory, SettingsProvider,
     LinkOpener, PlatformDetector, RunPreview, SetupManager, ToolQuery, ToolRegistry, ToolRunner,
 };
 use serde::Serialize;
@@ -30,6 +37,13 @@ pub struct AppState {
     pub runner: Arc<dyn ToolRunner>,
     pub jobs: Arc<dyn JobRegistry>,
     pub labs: Arc<dyn LabManager>,
+    pub launch: Arc<LaunchRouter>,
+    pub store: Arc<dyn JobStore>,
+    pub history: Arc<dyn RunHistory>,
+    pub settings: Arc<dyn SettingsProvider>,
+    pub saver: Arc<dyn ResultSaver>,
+    pub learning: Arc<dyn LearningCatalog>,
+    pub support: Arc<RunSupport>,
     pub links: Arc<dyn LinkOpener>,
     pub capabilities: Capabilities,
     pub activity: Arc<dyn ActivityLogger>,
@@ -136,14 +150,14 @@ pub async fn verify_tool(state: State<'_, AppState>, id: String) -> AppResult<Op
 }
 
 #[tauri::command]
-pub fn preview_launch(
+pub async fn preview_launch(
     state: State<'_, AppState>,
     id: String,
     profile: String,
     values: Option<HashMap<String, ParamValue>>,
     approvals: Option<RunApprovals>,
 ) -> AppResult<RunPreview> {
-    state.runner.preview(&ToolId::new(id)?, &profile, &values.unwrap_or_default(), &approvals.unwrap_or_default())
+    state.runner.preview(&ToolId::new(id)?, &profile, &values.unwrap_or_default(), &approvals.unwrap_or_default()).await
 }
 
 /// Start a launch profile. Container runs only start with exactly the approvals the user confirmed.
@@ -156,11 +170,6 @@ pub async fn launch_tool(
     approvals: Option<RunApprovals>,
 ) -> AppResult<OperationId> {
     state.runner.start(&ToolId::new(id)?, &profile, &values.unwrap_or_default(), &approvals.unwrap_or_default()).await
-}
-
-#[tauri::command]
-pub fn list_labs(state: State<'_, AppState>) -> Vec<LabDefinition> {
-    state.labs.list()
 }
 
 /// The UI names a tool and a link kind; the URL is read from the validated manifest.
@@ -227,3 +236,124 @@ pub fn open_setup_link(state: State<'_, AppState>, id: SetupActionId) -> AppResu
     state.links.open(&link)
 }
 
+
+// ------------------------------------------------------------------ phase 5: running tools, history, labs, learning
+
+#[tauri::command]
+pub fn get_launch_defaults(state: State<'_, AppState>, id: String, profile: String) -> AppResult<LaunchDefaults> {
+    state.launch.defaults(&ToolId::new(id)?, &profile)
+}
+
+#[tauri::command]
+pub fn get_job(state: State<'_, AppState>, id: OperationId) -> AppResult<Job> {
+    state.store.get_job(id)
+}
+
+/// Output lines with a sequence number greater than `after` (0 = from the start). The UI polls this while a run is active.
+#[tauri::command]
+pub fn get_run_output(state: State<'_, AppState>, id: OperationId, after: Option<i64>) -> AppResult<Vec<OutputRow>> {
+    state.store.output_since(id, after.unwrap_or(0).max(0), 2000)
+}
+
+#[tauri::command]
+pub fn list_runs(state: State<'_, AppState>, limit: Option<usize>) -> AppResult<Vec<RunRecord>> {
+    state.history.list_runs(limit.unwrap_or(50).clamp(1, 500))
+}
+
+#[tauri::command]
+pub fn get_run(state: State<'_, AppState>, id: OperationId) -> AppResult<RunRecord> {
+    state.history.get_run(id)
+}
+
+/// Save a run's stored output. The backend opens the Save dialog and writes the file; the UI never supplies a path or the text.
+#[tauri::command]
+pub async fn save_run_output(state: State<'_, AppState>, id: OperationId) -> AppResult<Option<String>> {
+    let run = state.history.get_run(id)?;
+    let lines = state.store.job_output(id, 100_000)?;
+    if lines.is_empty() {
+        return Err(AppError::NotFound("stored output for this run (it may have expired under your retention settings)".into()));
+    }
+    let name = suggested_file_name(run.tool_id.as_str(), &run.profile_id, &run.started_at, "txt");
+    let saved = state.saver.save(&name, &lines.join("\n")).await?;
+    if let Some(path) = &saved {
+        state.history.set_result_path(id, path)?;
+        let _ = state.activity.record(ActivityEvent { at: now(), kind: ActivityKind::ResultSaved, tool_id: Some(run.tool_id.clone()), summary: format!("output of '{}' saved", run.profile_id) });
+    }
+    Ok(saved)
+}
+
+/// Show a run's own folder (where tools such as ZAP write report files) in Explorer.
+#[tauri::command]
+pub fn open_run_folder(state: State<'_, AppState>, id: OperationId) -> AppResult<()> {
+    let run = state.history.get_run(id)?;
+    let dir = run.run_dir.ok_or_else(|| AppError::NotFound("a folder for this run".into()))?;
+    let dir = PathBuf::from(dir);
+    // Only folders this application created for runs can be opened.
+    if dir.parent() != Some(state.support.runs_dir.as_path()) {
+        return Err(AppError::Validation("that is not a run folder".into()));
+    }
+    state.links.open_folder(&dir)
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> UserSettings {
+    state.settings.get()
+}
+
+#[tauri::command]
+pub fn update_settings(state: State<'_, AppState>, settings: UserSettings) -> AppResult<UserSettings> {
+    state.settings.update(settings)?;
+    log(&state, ActivityKind::SettingsChanged, "lab list or retention settings changed");
+    let _ = state.support.purge_expired();
+    Ok(state.settings.get())
+}
+
+/// Delete all finished run history and stored output now.
+#[tauri::command]
+pub fn purge_history_now(state: State<'_, AppState>) -> AppResult<PurgeReport> {
+    let cutoff = (chrono::Utc::now() + chrono::Duration::seconds(1)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let report = state.history.purge(&cutoff, &cutoff)?;
+    state.support.remove_stale_run_dirs();
+    log(&state, ActivityKind::HistoryPurged, &format!("{} run record(s) deleted", report.runs_deleted));
+    Ok(report)
+}
+
+#[tauri::command]
+pub fn list_labs(state: State<'_, AppState>) -> Vec<LabStatus> {
+    state.labs.list().into_iter().map(|lab| {
+        let st = state.labs.state(&lab.id).unwrap_or(LabState::Stopped);
+        LabStatus { lab, state: st }
+    }).collect()
+}
+
+#[tauri::command]
+pub async fn start_lab(state: State<'_, AppState>, id: String) -> AppResult<Vec<LabStatus>> {
+    state.labs.start(&LabId::new(id)?).await?;
+    log(&state, ActivityKind::LabStarted, "learning lab started");
+    Ok(list_labs(state))
+}
+
+#[tauri::command]
+pub async fn stop_lab(state: State<'_, AppState>, id: String) -> AppResult<Vec<LabStatus>> {
+    state.labs.stop(&LabId::new(id)?).await?;
+    log(&state, ActivityKind::LabStopped, "learning lab stopped");
+    Ok(list_labs(state))
+}
+
+#[tauri::command]
+pub fn list_tutorials(state: State<'_, AppState>) -> Vec<Tutorial> {
+    state.learning.list()
+}
+
+#[tauri::command]
+pub fn get_tutorial(state: State<'_, AppState>, id: String) -> AppResult<Tutorial> {
+    state.learning.get(&ToolId::new(id)?)
+}
+
+/// Open one of a tutorial's official links. The UI names the tutorial and the link's position; the address is read from the validated tutorial.
+#[tauri::command]
+pub fn open_tutorial_link(state: State<'_, AppState>, tool_id: String, index: usize) -> AppResult<()> {
+    let t = state.learning.get(&ToolId::new(tool_id)?)?;
+    let link = t.links.get(index).ok_or_else(|| AppError::NotFound("that link".into()))?;
+    state.links.open(&link.url)
+}

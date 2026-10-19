@@ -1,8 +1,8 @@
-//! Deterministic test doubles. Compiled only for unit tests; production code never sees them.
+﻿//! Deterministic test doubles. Compiled only for unit tests; production code never sees them.
 
 use crate::domain::process::{CancellationToken, OutputStream};
 use crate::domain::AppResult;
-use crate::ports::{CommandExecutor, CommandOutcome, CommandResult, CommandSpec, ExecutableLocator, LineSink};
+use crate::ports::{CommandExecutor, CommandOutcome, CommandResult, CommandSpec, ExecOptions, ExecutableLocator, LineSink};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -46,19 +46,29 @@ type Handler = Box<dyn Fn(&CommandSpec) -> Step + Send + Sync>;
 pub struct MockExecutor {
     handler: Handler,
     calls: Mutex<Vec<CommandSpec>>,
+    options: Mutex<Vec<ExecOptions>>,
 }
 
 impl MockExecutor {
     pub fn new(handler: impl Fn(&CommandSpec) -> Step + Send + Sync + 'static) -> Self {
-        Self { handler: Box::new(handler), calls: Mutex::new(Vec::new()) }
+        Self { handler: Box::new(handler), calls: Mutex::new(Vec::new()), options: Mutex::new(Vec::new()) }
     }
     pub fn calls(&self) -> Vec<CommandSpec> {
         self.calls.lock().unwrap().clone()
+    }
+    /// Options passed to `run_in`, in call order.
+    pub fn options(&self) -> Vec<ExecOptions> {
+        self.options.lock().unwrap().clone()
     }
 }
 
 #[async_trait]
 impl CommandExecutor for MockExecutor {
+    async fn run_in(&self, spec: CommandSpec, opts: ExecOptions, sink: &dyn LineSink, cancel: &CancellationToken) -> AppResult<CommandResult> {
+        self.options.lock().unwrap().push(opts);
+        self.run(spec, sink, cancel).await
+    }
+
     async fn run(&self, spec: CommandSpec, sink: &dyn LineSink, cancel: &CancellationToken) -> AppResult<CommandResult> {
         let step = (self.handler)(&spec);
         self.calls.lock().unwrap().push(spec);
@@ -112,3 +122,4 @@ impl LineSink for VecSink {
         self.0.lock().unwrap().push(text.to_string());
     }
 }
+

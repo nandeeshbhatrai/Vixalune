@@ -1,4 +1,4 @@
-﻿//! SQLite persistence for jobs, job output and installation records.
+//! SQLite persistence for jobs, job output and installation records.
 //!
 //! A partial unique index guarantees at most one *active* job per tool even across processes, so
 //! duplicate installation requests cannot corrupt an installation.
@@ -6,8 +6,9 @@
 use crate::domain::activity::redact;
 use crate::domain::jobs::{InstallationRecord, Job, JobError, JobKind, JobPhase};
 use crate::domain::process::OutputStream;
+use crate::domain::runs::{OutputRow, PurgeReport, RunRecord};
 use crate::domain::{AppError, AppResult, OperationId, ToolId};
-use crate::ports::JobStore;
+use crate::ports::{JobStore, RunHistory};
 use rusqlite::{params, Connection, ErrorCode, Row};
 use std::path::Path;
 use std::sync::Mutex;
@@ -63,6 +64,12 @@ impl SqliteJobStore {
                 text TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS job_output_job ON job_output(job_id);
+            CREATE TABLE IF NOT EXISTS runs (
+                id TEXT PRIMARY KEY,
+                started_at TEXT NOT NULL,
+                record_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
             CREATE TABLE IF NOT EXISTS installations (
                 tool_id TEXT PRIMARY KEY,
                 record_json TEXT NOT NULL
@@ -225,6 +232,18 @@ impl JobStore for SqliteJobStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    fn output_since(&self, id: OperationId, after: i64, limit: usize) -> AppResult<Vec<OutputRow>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT id, stream, text FROM job_output WHERE job_id=?1 AND id>?2 ORDER BY id ASC LIMIT ?3")?;
+        let rows = stmt.query_map(params![id.to_string(), after, limit as i64], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, stream, text) = row?;
+            out.push(OutputRow { seq, stream: unjson(&format!("\"{stream}\""))?, text });
+        }
+        Ok(out)
+    }
+
     fn interrupt_active(&self, now: &str) -> AppResult<Vec<Job>> {
         let active: Vec<Job> = {
             let conn = self.conn()?;
@@ -294,6 +313,57 @@ impl JobStore for SqliteJobStore {
     fn delete_installation(&self, tool: &ToolId) -> AppResult<()> {
         self.conn()?.execute("DELETE FROM installations WHERE tool_id=?1", params![tool.as_str()])?;
         Ok(())
+    }
+}
+
+impl RunHistory for SqliteJobStore {
+    fn put_run(&self, run: &RunRecord) -> AppResult<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO runs (id, started_at, record_json) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json",
+            params![run.id.to_string(), run.started_at, json(run)?],
+        )?;
+        Ok(())
+    }
+
+    fn get_run(&self, id: OperationId) -> AppResult<RunRecord> {
+        let conn = self.conn()?;
+        let s: String = conn
+            .query_row("SELECT record_json FROM runs WHERE id=?1", params![id.to_string()], |r| r.get(0))
+            .map_err(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { AppError::NotFound(format!("run '{id}'")) } else { e.into() })?;
+        unjson(&s)
+    }
+
+    fn list_runs(&self, limit: usize) -> AppResult<Vec<RunRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT record_json FROM runs ORDER BY rowid DESC LIMIT ?1")?;
+        let rows = stmt.query_map(params![limit as i64], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for s in rows {
+            out.push(unjson(&s?)?);
+        }
+        Ok(out)
+    }
+
+    fn set_result_path(&self, id: OperationId, path: &str) -> AppResult<()> {
+        let mut run = self.get_run(id)?;
+        run.result_path = Some(path.to_string());
+        self.put_run(&run)
+    }
+
+    fn purge(&self, history_before: &str, output_before: &str) -> AppResult<PurgeReport> {
+        let conn = self.conn()?;
+        // Output of finished jobs older than the output cutoff.
+        let output_lines_deleted = conn.execute(
+            "DELETE FROM job_output WHERE job_id IN (SELECT id FROM jobs WHERE finished_at IS NOT NULL AND finished_at < ?1)",
+            params![output_before],
+        )?;
+        let runs_deleted = conn.execute("DELETE FROM runs WHERE started_at < ?1", params![history_before])?;
+        // Finished jobs older than the history cutoff, with whatever output they still had.
+        conn.execute("DELETE FROM job_output WHERE job_id IN (SELECT id FROM jobs WHERE finished_at IS NOT NULL AND finished_at < ?1)", params![history_before])?;
+        let jobs_deleted = conn.execute("DELETE FROM jobs WHERE finished_at IS NOT NULL AND finished_at < ?1", params![history_before])?;
+        Ok(PurgeReport { runs_deleted, output_lines_deleted, jobs_deleted })
     }
 }
 
@@ -435,5 +505,92 @@ mod tests {
         s.delete_installation(&tool).unwrap();
         assert_eq!(s.get_installation(&tool).unwrap(), None);
     }
+
+    fn run_rec(id: OperationId, started: &str) -> RunRecord {
+        use crate::domain::manifest::{NetworkActivity, OutputFormat};
+        RunRecord {
+            id,
+            tool_id: ToolId::new("nmap").unwrap(),
+            tool_name: "Nmap".into(),
+            profile_id: "quick-scan".into(),
+            profile_label: "Quick scan".into(),
+            tool_version: Some("7.80".into()),
+            started_at: started.into(),
+            finished_at: None,
+            duration_ms: None,
+            exit_code: None,
+            outcome: None,
+            command: "nmap.exe -F 127.0.0.1".into(),
+            targets: vec!["127.0.0.1".into()],
+            scope: "your local practice lab".into(),
+            network_activity: NetworkActivity::ProbesTargets,
+            output_format: OutputFormat::Text,
+            run_dir: None,
+            result_path: None,
+        }
+    }
+
+    #[test]
+    fn run_history_round_trips_newest_first_and_remembers_the_saved_path() {
+        let s = SqliteJobStore::in_memory().unwrap();
+        let (a, b) = (OperationId::new(), OperationId::new());
+        s.put_run(&run_rec(a, "2026-01-01T00:00:00Z")).unwrap();
+        s.put_run(&run_rec(b, "2026-01-02T00:00:00Z")).unwrap();
+        let mut done = run_rec(a, "2026-01-01T00:00:00Z");
+        done.exit_code = Some(0);
+        done.outcome = Some(crate::domain::runs::RunOutcome::Findings);
+        s.put_run(&done).unwrap();
+        let list = s.list_runs(10).unwrap();
+        assert_eq!(list.iter().map(|r| r.id).collect::<Vec<_>>(), vec![b, a]);
+        assert_eq!(s.get_run(a).unwrap().outcome, Some(crate::domain::runs::RunOutcome::Findings));
+        s.set_result_path(a, "D:\\results\\scan.txt").unwrap();
+        assert_eq!(s.get_run(a).unwrap().result_path.as_deref(), Some("D:\\results\\scan.txt"));
+        assert!(matches!(s.get_run(OperationId::new()), Err(AppError::NotFound(_))));
+    }
+
+    #[test]
+    fn incremental_output_carries_streams_and_resumes_after_a_sequence_number() {
+        let s = SqliteJobStore::in_memory().unwrap();
+        let j = job("a", JobPhase::Running);
+        s.create_job(&j).unwrap();
+        s.append_output(j.id, OutputStream::Stdout, "one").unwrap();
+        s.append_output(j.id, OutputStream::Stderr, "two").unwrap();
+        let all = s.output_since(j.id, 0, 100).unwrap();
+        assert_eq!(all.iter().map(|r| (r.stream, r.text.as_str())).collect::<Vec<_>>(), vec![(OutputStream::Stdout, "one"), (OutputStream::Stderr, "two")]);
+        s.append_output(j.id, OutputStream::Stdout, "three").unwrap();
+        let rest = s.output_since(j.id, all.last().unwrap().seq, 100).unwrap();
+        assert_eq!(rest.len(), 1);
+        assert_eq!(rest[0].text, "three");
+        assert!(s.output_since(j.id, rest[0].seq, 100).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retention_purges_old_output_and_history_independently() {
+        let s = SqliteJobStore::in_memory().unwrap();
+        let mut old = job("a", JobPhase::Succeeded);
+        old.finished_at = Some("2026-01-01T00:00:00Z".into());
+        let mut recent = job("b", JobPhase::Succeeded);
+        recent.finished_at = Some("2026-03-01T00:00:00Z".into());
+        let active = job("c", JobPhase::Running);
+        for j in [&old, &recent, &active] {
+            s.create_job(j).unwrap();
+            s.append_output(j.id, OutputStream::Stdout, "line").unwrap();
+        }
+        s.put_run(&run_rec(old.id, "2026-01-01T00:00:00Z")).unwrap();
+        s.put_run(&run_rec(recent.id, "2026-03-01T00:00:00Z")).unwrap();
+        // Output expires first; history (and the job rows it needs) stays.
+        let r = s.purge("2025-12-01T00:00:00Z", "2026-02-01T00:00:00Z").unwrap();
+        assert_eq!((r.output_lines_deleted, r.runs_deleted, r.jobs_deleted), (1, 0, 0));
+        assert!(s.job_output(old.id, 10).unwrap().is_empty());
+        assert_eq!(s.job_output(recent.id, 10).unwrap().len(), 1);
+        assert_eq!(s.list_runs(10).unwrap().len(), 2);
+        // Then the history expires. Running jobs are never touched.
+        let r = s.purge("2026-02-01T00:00:00Z", "2026-02-01T00:00:00Z").unwrap();
+        assert_eq!((r.runs_deleted, r.jobs_deleted), (1, 1));
+        assert_eq!(s.list_runs(10).unwrap().len(), 1);
+        assert_eq!(s.job_output(active.id, 10).unwrap().len(), 1);
+        assert!(s.get_job(active.id).is_ok());
+    }
 }
+
 

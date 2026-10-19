@@ -1,10 +1,10 @@
 schema_version = 2
-manifest_version = "1.0.0"
+manifest_version = "1.1.0"
 maintainer = "Vixalune catalog"
 id = "nmap"
 name = "Nmap"
 summary = "Network discovery and port scanner."
-description = "Nmap discovers hosts and services on a network by sending packets and analysing responses. Use it only against systems you own or are explicitly authorised to test, such as your local lab."
+description = "Nmap discovers hosts and services on a network by sending packets and analysing responses. Use it only against systems you own or are explicitly authorised to test, such as your local practice lab."
 category = "reconnaissance"
 tags = ["scanner", "ports", "discovery"]
 license = "LicenseRef-Nmap"
@@ -62,14 +62,73 @@ args = ["--version"]
 locations = ["{ProgramFilesX86}\\Nmap", "{ProgramFiles}\\Nmap"]
 expect_output_contains = "Nmap version"
 
+# ---------------------------------------------------------------- launch profiles
+# Nmap runs unelevated: no raw-socket features (OS detection, SYN scan) are offered, so it never needs
+# administrator rights. Profiles are intentionally narrow; there is no free-form argument field.
+
 [[launch_profiles]]
-id = "scan"
-label = "Scan a target"
-description = "Run nmap against a host or range you are authorised to scan."
+id = "host-discovery"
+label = "Find live hosts (no port scan)"
+description = "Checks which addresses in a lab network answer. It does not scan ports."
 runtime = "windows_native"
 executable = "nmap.exe"
+network_activity = "probes_targets"
+timeout_secs = 300
+output_format = "text"
+expected_output = "Lines starting 'Nmap scan report for' for each host that is up, and a final 'Nmap done' summary."
+findings_patterns = ['(?m)^Host is up']
 args = [
-  { kind = "flag", param = "service_scan", flag = "-sV" },
+  { kind = "literal", value = "-sn" },
+  { kind = "value", param = "target" },
+]
+
+[[launch_profiles.parameters]]
+name = "target"
+label = "Target"
+description = "A host name, an IP address, or a small CIDR range such as 192.168.56.0/24 (at most 4096 addresses)."
+required = true
+kind = { type = "host" }
+default = "{lab:web_host}"
+
+[[launch_profiles]]
+id = "quick-scan"
+label = "Scan the 100 most common ports"
+description = "A fast look at which common services a host exposes. Only open ports are listed."
+runtime = "windows_native"
+executable = "nmap.exe"
+network_activity = "probes_targets"
+timeout_secs = 600
+output_format = "text"
+expected_output = "A table of open ports (PORT STATE SERVICE). No rows means no common port was open."
+findings_patterns = ['(?m)^\d+/(tcp|udp)\s+open']
+args = [
+  { kind = "literal", value = "-F" },
+  { kind = "literal", value = "--open" },
+  { kind = "value", param = "target" },
+]
+
+[[launch_profiles.parameters]]
+name = "target"
+label = "Target"
+description = "A host name or IP address you are authorised to scan."
+required = true
+kind = { type = "host" }
+default = "{lab:web_host}"
+
+[[launch_profiles]]
+id = "service-scan"
+label = "Identify services on chosen ports"
+description = "Connects to the ports you list and tries to recognise the software answering."
+runtime = "windows_native"
+executable = "nmap.exe"
+network_activity = "probes_targets"
+timeout_secs = 900
+output_format = "text"
+expected_output = "For each open port, the service name and (when recognised) product and version."
+findings_patterns = ['(?m)^\d+/(tcp|udp)\s+open']
+args = [
+  { kind = "literal", value = "-sV" },
+  { kind = "literal", value = "--version-light" },
   { kind = "option", param = "ports", flag = "-p" },
   { kind = "value", param = "target" },
 ]
@@ -77,18 +136,15 @@ args = [
 [[launch_profiles.parameters]]
 name = "target"
 label = "Target"
-description = "Hostname, IP address or CIDR range you are authorised to scan."
+description = "A host name or IP address you are authorised to scan."
 required = true
 kind = { type = "host" }
+default = "{lab:web_host}"
 
 [[launch_profiles.parameters]]
 name = "ports"
 label = "Ports"
-description = "Port list such as 22,80,443 or 1-1024."
-kind = { type = "text", max_len = 64 }
-
-[[launch_profiles.parameters]]
-name = "service_scan"
-label = "Detect service versions (-sV)"
-kind = { type = "boolean" }
-default = false
+description = "Ports to check, for example 80,443 or 8000-8100 (at most 32 entries)."
+required = true
+kind = { type = "port_list" }
+default = "{lab:web_port}"

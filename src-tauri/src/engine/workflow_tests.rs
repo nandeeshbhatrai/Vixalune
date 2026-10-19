@@ -270,10 +270,10 @@ async fn container_workflow_pull_by_digest_verify_hardened_run_and_cleanup() {
     // Launch through the runner with explicit approvals; the run is a job and the container is hardened.
     let proj = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("mount-tests").join("workflow");
     std::fs::create_dir_all(&proj).unwrap();
-    let approvals = RunApprovals { network: false, mounts: HashMap::from([("source".to_string(), proj.display().to_string())]), ports: HashMap::new() };
+    let approvals = RunApprovals { network: false, mounts: HashMap::from([("source".to_string(), proj.display().to_string())]), ports: HashMap::new(), scope: None };
     let vals = HashMap::from([("config".to_string(), crate::domain::manifest::ParamValue::Text("/src/.semgrep.yml".into()))]);
     *l.w.run_step.lock().unwrap() = Some(Step::ok(&["Ran 4 rules on 12 files: 1 finding."]));
-    let preview = l.runner.preview(&semgrep(), "scan-local", &vals, &approvals).unwrap();
+    let preview = l.runner.preview(&semgrep(), "scan-local", &vals, &approvals).await.unwrap();
     assert_eq!(preview.container.as_ref().unwrap().network, "none");
     let op = l.runner.start(&semgrep(), "scan-local", &vals, &approvals).await.unwrap();
     let run = l.runner.wait(op, WAIT).await.unwrap();
@@ -329,7 +329,7 @@ async fn container_failures_are_diagnosed_and_never_fall_back_to_something_less_
     let l = lab(env(true, true, 100));
     let proj = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("mount-tests").join("workflow");
     std::fs::create_dir_all(&proj).unwrap();
-    let approvals = RunApprovals { network: true, mounts: HashMap::from([("source".to_string(), proj.display().to_string())]), ports: HashMap::new() };
+    let approvals = RunApprovals { network: true, mounts: HashMap::from([("source".to_string(), proj.display().to_string())]), ports: HashMap::new(), scope: None };
     assert!(l.runner.start(&semgrep(), "scan-registry-rules", &HashMap::new(), &approvals).await.is_err());
     assert!(l.exec.calls().iter().all(|c| c.args[0] != "pull" && c.args[0] != "run"));
 }
@@ -341,7 +341,7 @@ async fn a_tool_cannot_be_run_and_removed_at_the_same_time() {
     *l.w.run_step.lock().unwrap() = Some(Step::hang(&["scanning"]));
     let proj = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("mount-tests").join("workflow");
     std::fs::create_dir_all(&proj).unwrap();
-    let approvals = RunApprovals { network: false, mounts: HashMap::from([("source".to_string(), proj.display().to_string())]), ports: HashMap::new() };
+    let approvals = RunApprovals { network: false, mounts: HashMap::from([("source".to_string(), proj.display().to_string())]), ports: HashMap::new(), scope: None };
     let vals = HashMap::from([("config".to_string(), crate::domain::manifest::ParamValue::Text("/src/.semgrep.yml".into()))]);
     let op = l.runner.start(&semgrep(), "scan-local", &vals, &approvals).await.unwrap();
     for _ in 0..200 {

@@ -1,5 +1,5 @@
 ﻿schema_version = 2
-manifest_version = "1.0.0"
+manifest_version = "1.1.0"
 maintainer = "Vixalune catalog"
 id = "semgrep"
 name = "Semgrep"
@@ -81,9 +81,14 @@ description = "No network access. Put a rules file inside the folder you choose.
 runtime = "container"
 executable = "semgrep"
 mounts = ["source"]
+timeout_secs = 900
+output_format = "text"
+exit_codes = { ok = [0], findings = [1] }
+expected_output = "A list of findings (rule, file, line) or 'Ran N rules ... 0 findings'. Exit code 1 means findings, not a crash."
 args = [
   { kind = "literal", value = "scan" },
   { kind = "option", param = "config", flag = "--config" },
+  { kind = "literal", value = "--error" },
   { kind = "literal", value = "--metrics" },
   { kind = "literal", value = "off" },
   { kind = "literal", value = "--disable-version-check" },
@@ -105,11 +110,41 @@ description = "Downloads the public rule set, so network access must be approved
 runtime = "container"
 executable = "semgrep"
 needs_network = true
+network_activity = "downloads_data"
+timeout_secs = 900
+output_format = "text"
+exit_codes = { ok = [0], findings = [1] }
+expected_output = "Findings from the public rule set, or 0 findings."
 mounts = ["source"]
 args = [
   { kind = "literal", value = "scan" },
   { kind = "literal", value = "--config" },
   { kind = "literal", value = "p/default" },
+  { kind = "literal", value = "--error" },
+  { kind = "literal", value = "--metrics" },
+  { kind = "literal", value = "off" },
+  { kind = "literal", value = "--disable-version-check" },
+  { kind = "literal", value = "/src" },
+]
+
+
+[[launch_profiles]]
+id = "scan-sample"
+label = "Scan the practice code project (offline)"
+description = "Scans the safe sample project that Vixalune creates for exercises, with the sample rules it contains. No network access."
+runtime = "container"
+executable = "semgrep"
+mounts = ["source"]
+timeout_secs = 900
+output_format = "text"
+exit_codes = { ok = [0], findings = [1] }
+expected_output = "Several findings in sample files (an eval of user input, a shell command built from input, a hard-coded password)."
+suggested_mounts = [{ name = "source", value = "{lab:sample_folder}" }]
+args = [
+  { kind = "literal", value = "scan" },
+  { kind = "literal", value = "--config" },
+  { kind = "literal", value = "/src/.semgrep.yml" },
+  { kind = "literal", value = "--error" },
   { kind = "literal", value = "--metrics" },
   { kind = "literal", value = "off" },
   { kind = "literal", value = "--disable-version-check" },

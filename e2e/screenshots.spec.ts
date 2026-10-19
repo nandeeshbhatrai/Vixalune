@@ -14,6 +14,9 @@ const pages: [string, string][] = [
   ["catalog", "/#/catalog"],
   ["tool-detail", "/#/catalog/semgrep"],
   ["installed", "/#/installed"],
+  ["run", "/#/run/nmap"],
+  ["learn", "/#/learn"],
+  ["tutorial", "/#/learn/nmap"],
   ["jobs", "/#/jobs"],
   ["labs", "/#/labs"],
   ["activity", "/#/activity"],
@@ -28,6 +31,16 @@ for (const [name, path] of pages) {
     await page.screenshot({ path: `docs/screenshots/${name}.png` });
   });
 }
+
+test("screenshot a finished run", async ({ page }) => {
+  await page.goto("/#/run/nmap");
+  await page.getByRole("button", { name: "Review what will run" }).click();
+  await page.getByRole("checkbox", { name: /reviewed the command and target/ }).check();
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await page.getByText("Completed with findings").first().waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: "docs/screenshots/run-finished.png", fullPage: true });
+});
 
 test("screenshot light and dialog", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });

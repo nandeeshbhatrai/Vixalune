@@ -76,11 +76,45 @@ Outcomes: `passed`, `failed`, and `unavailable` (the check could not run, e.g. w
 
 ## Launch profiles
 
-`[[launch_profiles]]` (replaces v1 `run`): `id`, `label`, `description`, `runtime`, `executable` (bare name), `parameters`, `args`.
+`[[launch_profiles]]`: `id`, `label`, `description`, `runtime` (`windows_native`, `wsl`, `container`), `executable` (bare name), `parameters`, `args`, and:
 
-Parameters: `name` (`[a-z][a-z0-9_]*`), `label`, `description`, `kind` (`{type="text", max_len}`, `{type="host"}`, `{type="integer", min, max}`, `{type="boolean"}`, `{type="choice", options}`), `required`, `default`.
+| Field | Meaning |
+|---|---|
+| `timeout_secs` | Hard limit, default 600, at most 3600. The process tree is killed when it expires |
+| `working_dir` | `run_dir` (default: a fresh empty folder per run) or `install_dir` |
+| `output_format` | `text` (default), `json`, `xml`, `html`, `sarif` |
+| `network_activity` | `none` (default), `probes_targets` (sends traffic to user-named targets; required when, and only when, the profile has host/ip/url parameters), `downloads_data` (public data only; must have no target parameters) |
+| `exit_codes` | `{ ok = [0], findings = [1] }`: which codes mean "completed" and which "completed with findings"; any other code is a failure |
+| `findings_patterns` | Regular expressions; a match in the output of an `ok` run means findings (for tools whose exit code cannot say, such as Nmap) |
+| `env` | Fixed, non-secret environment variables (`{ name, value }`) |
+| `locations` | Extra known-folder placeholders (`{ProgramFiles}`, `{ProgramFilesX86}`, `{LocalAppData}`) searched for the executable |
+| `expected_output` | One plain-language sentence shown before running |
+| `suggested_mounts` | Container profiles: suggested folders for mounts; the user still approves each |
 
-Arg templates: `literal`, `value`, `flag` (boolean param → flag), `option` (flag + value). Values are **validated, never escaped**: text/host values reject control characters and a leading `-`, hosts are limited to `[A-Za-z0-9.:/_\-\[\]]`. Launching is not implemented yet; the command builder is (`build_command`, tested against injection strings).
+Parameters: `name` (`[a-z][a-z0-9_]*`), `label`, `description`, `required`, `default`, and `kind`:
+
+| Kind | Validation |
+|---|---|
+| `text` (`max_len`) | No control characters, no leading `-` |
+| `host` | Host name, IP or small CIDR range; always goes through the scope engine |
+| `ip` | One IP address; scope engine |
+| `url` | `http`/`https`, no credentials; scope engine (including redirect hops for http) |
+| `port` | 1-65535 |
+| `port_list` (`max_items`) | `22,80,8000-8100`; ascending ranges, no spaces |
+| `path` (`path_kind` = `file`/`directory`, `must_exist`, `extensions`) | Syntax checked, then checked against the real file system at run time; system/credential folders refused |
+| `integer` (`min`,`max`), `boolean`, `choice` (`options`) | Range, type, membership |
+
+Defaults may use lab placeholders `{lab:web_host}`, `{lab:web_port}`, `{lab:web_url}`, `{lab:sample_folder}`, `{lab:sample_rules}`; the backend resolves them to the running lab.
+
+Arg templates: `literal`, `value`, `flag` (boolean param becomes a flag), `option` (flag + value), `run_file` (`name`, optional `flag`: a file inside the run folder). Values are **validated, never escaped**.
+Manifest validation also rejects profiles that probe targets but do not say `probes_targets`, invalid regular expressions, timeouts out of range and unknown exit-code rules.
+
+Profiles used by Phase 5: Nmap (`host-discovery`, `quick-scan`, `service-scan`), Trivy (`scan-folder`), OWASP ZAP (`quick-scan`, command-line flags **unverified on real hardware**), Semgrep (`scan-local`, `scan-registry-rules`, `scan-sample`; container).
+
+## Learning tutorials (`learning/<tool>.toml`)
+
+Closed schema (`deny_unknown_fields`): `tool_id`, `title`, `what_it_does`, `problem_solved`, `requirements[]`, `authorization_warning` (mandatory; must mention permission or authorisation), `first_run[]` (3-8 steps, optional `profile`),
+`parameters[]` (`profile`, `name`, `explanation`), `example` (`profile`, `output`, `interpretation[]`), `common_errors[]` (2-12; `symptom`, `cause`, `fix`), `exercise` (`lab` = `practice-web` or `sample-code`, `profile`, `goal`, `steps[]`, `expected`, `stretch`) and `links[]` (plain https on the tool's official sites only). Every profile and parameter named must exist in the tool's manifest or the tutorial is rejected at load time.
 
 ## Example
 

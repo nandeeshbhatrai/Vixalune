@@ -1,4 +1,5 @@
 ﻿import type { Backend } from "@/domain/backend";
+import { createDemoRuns } from "@/infra/demoRuns";
 import type {
   CapabilityReadiness,
   CatalogEntry,
@@ -7,9 +8,8 @@ import type {
   InstallState,
   Job,
   JobPhase,
-  LabDefinition,
+  RunSpec,
   PlatformReport,
-  RunPreview,
   SetupAction,
   ToolManifest,
 } from "@/domain/types";
@@ -57,6 +57,27 @@ function tool(seed: ToolSeed): CatalogEntry {
   };
 }
 
+function nativeProfile(id: string, label: string, description: string, executable: string, parameters: RunSpec["parameters"], expected: string, timeout: number, format: RunSpec["output_format"] = "text"): RunSpec {
+  return {
+    id,
+    label,
+    description,
+    runtime: "windows_native",
+    executable,
+    parameters,
+    mounts: [],
+    needs_network: false,
+    ports: [],
+    working_dir: "run_dir",
+    timeout_secs: timeout,
+    output_format: format,
+    network_activity: "probes_targets",
+    exit_codes: { ok: [0], findings: [] },
+    expected_output: expected,
+    suggested_mounts: [],
+  };
+}
+
 export const DEMO_TOOLS: CatalogEntry[] = [
   tool({
     id: "nmap",
@@ -69,6 +90,15 @@ export const DEMO_TOOLS: CatalogEntry[] = [
     recommended_for_beginners: true,
     privileges: { install: "required", run: "none", may_require_restart: false },
     install: [{ method: "winget", package_id: "Insecure.Nmap" }],
+    launch_profiles: [
+      nativeProfile("quick-scan", "Scan the 100 most common ports", "A fast look at which common services a host exposes.", "nmap.exe", [
+        { name: "target", label: "Target", description: "A host name or IP address you are authorised to scan.", kind: { type: "host" }, required: true, default: "127.0.0.1" },
+      ], "A table of open ports (PORT STATE SERVICE).", 600),
+      nativeProfile("service-scan", "Identify services on chosen ports", "Connects to the ports you list and tries to recognise the software answering.", "nmap.exe", [
+        { name: "target", label: "Target", description: "A host name or IP address you are authorised to scan.", kind: { type: "host" }, required: true, default: "127.0.0.1" },
+        { name: "ports", label: "Ports", description: "Ports to check, for example 80,443 or 8000-8100 (at most 32 entries).", kind: { type: "port_list", max_items: 32 }, required: true, default: "18080" },
+      ], "For each open port, the service name and (when recognised) product and version.", 900),
+    ],
   }),
   tool({
     id: "zap",
@@ -77,6 +107,11 @@ export const DEMO_TOOLS: CatalogEntry[] = [
     category: "web_application",
     recommended_for_beginners: true,
     install: [{ method: "winget", package_id: "ZAP.ZAP" }],
+    launch_profiles: [
+      nativeProfile("quick-scan", "Quick scan of a web application (spider + active scan)", "ZAP crawls the site and actively probes it. This sends many requests.", "zap.exe", [
+        { name: "url", label: "Web application URL", description: "An http:// or https:// address.", kind: { type: "url" }, required: true, default: "http://127.0.0.1:18080/" },
+      ], "Progress messages, then an HTML report in the run folder.", 1800, "html"),
+    ],
   }),
   tool({
     id: "wireshark",
@@ -123,6 +158,21 @@ export const DEMO_TOOLS: CatalogEntry[] = [
         ports: [],
       },
       {
+        id: "scan-sample",
+        label: "Scan the practice code project (offline)",
+        description: "Scans the safe sample project with the sample rules it contains. No network access.",
+        runtime: "container",
+        executable: "semgrep",
+        parameters: [],
+        mounts: ["source"],
+        needs_network: false,
+        ports: [],
+        network_activity: "none",
+        exit_codes: { ok: [0], findings: [1] },
+        expected_output: "Several findings in sample files.",
+        suggested_mounts: [{ name: "source", value: "C:\Demo\Vixalune\labs\sample-code" }],
+      },
+      {
         id: "scan-registry-rules",
         label: "Scan with the Semgrep registry rules (needs internet)",
         description: "Downloads the public rule set.",
@@ -151,18 +201,17 @@ export const DEMO_TOOLS: CatalogEntry[] = [
     summary: "Vulnerability and misconfiguration scanner.",
     category: "vulnerability",
     install: [{ method: "winget", package_id: "AquaSecurity.Trivy" }],
+    launch_profiles: [
+      {
+        ...nativeProfile("scan-folder", "Scan a project folder for known vulnerabilities and exposed secrets", "Reads the dependency lists and files in a folder on this computer.", "trivy.exe", [
+          { name: "folder", label: "Folder to scan", description: "A project folder you own.", kind: { type: "path", path_kind: "directory", must_exist: true }, required: true, default: "C:\Demo\Vixalune\labs\sample-code" },
+          { name: "severity", label: "Report severities", description: "Which severities to list.", kind: { type: "choice", options: ["CRITICAL", "HIGH,CRITICAL", "MEDIUM,HIGH,CRITICAL"] }, required: true, default: "HIGH,CRITICAL" },
+        ], "Tables of vulnerable packages and any secrets found. Exit code 1 means findings, not a crash.", 900),
+        network_activity: "downloads_data",
+        exit_codes: { ok: [0], findings: [1] },
+      },
+    ],
   }),
-];
-
-const DEMO_LABS: LabDefinition[] = [
-  {
-    id: "demo-web-lab",
-    name: "Demo: intentionally vulnerable web app",
-    description: "Placeholder lab entry shown only in demo mode.",
-    image: "example/demo-lab",
-    digest: `sha256:${"0".repeat(64)}`,
-    ports: [{ container: 80, host: 8080 }],
-  },
 ];
 
 function minutesAgo(m: number): string {
@@ -360,6 +409,8 @@ export function createDemoBackend(): Backend {
     };
   };
 
+  const runs = createDemoRuns({ tools: DEMO_TOOLS, jobs, output, nextId: () => `demo-job-${++counter}` });
+
   return {
     isDemo: true,
     getAppInfo: async () => ({ name: "Vixalune", version: "demo", data_dir: "(demo)", rejected_manifests: [] }),
@@ -369,7 +420,7 @@ export function createDemoBackend(): Backend {
       verify: true,
       launch: true,
       jobs: true,
-      labs: false,
+      labs: true,
       installed_detection: true,
       install_methods: ["winget", "wsl_apt", "container_image"],
     }),
@@ -387,13 +438,12 @@ export function createDemoBackend(): Backend {
     refreshToolStates: async () => undefined,
     listInstalledTools: async () => installed.filter((i) => states.get(i.tool_id) !== "not_installed"),
     listJobs: async () => jobs.map((j) => ({ ...j })),
-    getJobOutput: async (jobId) => output[jobId] ?? [],
+    getJobOutput: async (jobId) => (runs.rows[jobId] ? runs.rows[jobId]!.map((r) => r.text) : (output[jobId] ?? [])),
     recentActivity: async () => [
       { at: minutesAgo(1), kind: "app_started", summary: "Demo: Vixalune started" },
       { at: minutesAgo(10), kind: "install_failed", tool_id: "zap", summary: "Demo: verification of ZAP failed" },
       { at: minutesAgo(31), kind: "install_succeeded", tool_id: "nmap", summary: "Demo: installed Nmap" },
     ],
-    listLabs: async () => DEMO_LABS,
     getInstallPlan: async (toolId): Promise<InstallPlan> => {
       const entry = DEMO_TOOLS.find((t) => t.manifest.id === toolId);
       if (!entry) return Promise.reject(notFound(toolId));
@@ -419,29 +469,7 @@ export function createDemoBackend(): Backend {
     installTool: async (id, allowElevation) => need(id) ?? simulate(id, "install", allowElevation, "installed"),
     uninstallTool: async (id, allowElevation) => need(id) ?? simulate(id, "uninstall", allowElevation, "not_installed"),
     verifyTool: async (id) => need(id) ?? simulate(id, "verify", false, "installed"),
-    previewLaunch: async (id, profile, _values, approvals): Promise<RunPreview> => {
-      const entry = DEMO_TOOLS.find((t) => t.manifest.id === id);
-      const p = entry?.manifest.launch_profiles.find((x) => x.id === profile);
-      if (!entry || !p) return Promise.reject(notFound(id));
-      if (p.needs_network && !approvals.network) return Promise.reject({ code: "validation", message: "validation failed: this profile needs network access, which you have not approved", recovery: "Correct the highlighted value and try again." });
-      const missingMount = p.mounts.find((m) => !approvals.mounts[m]);
-      if (missingMount) return Promise.reject({ code: "validation", message: `validation failed: choose and approve a folder for '${missingMount}'`, recovery: "Correct the highlighted value and try again." });
-      return {
-        command: { runtime: "container", program: p.executable, args: ["scan"], display: `${p.executable} scan /src` },
-        container: {
-          image: "docker.io/semgrep/semgrep@sha256:0000…",
-          command: `${p.executable} scan /src`,
-          user: "65532:65532",
-          network: p.needs_network ? "bridge" : "none",
-          mounts: p.mounts.map((m) => ({ host: approvals.mounts[m] ?? "", container: "/src", read_only: true })),
-          ports: [],
-          limits: "1024 MB memory, 1.00 CPU, 256 processes",
-          read_only_rootfs: true,
-          warnings: p.needs_network ? ["The container can reach the internet and your local network."] : [],
-        },
-      };
-    },
-    launchTool: async (id) => need(id) ?? simulate(id, "run", false, "installed"),
+    ...runs,
     runSetupAction: async (id, confirmed) => {
       if (!confirmed) return Promise.reject({ code: "validation", message: "validation failed: this changes your computer, so it needs your explicit confirmation", recovery: "Correct the highlighted value and try again." });
       const jobId = `demo-job-${++counter}`;
@@ -474,6 +502,7 @@ export function createDemoBackend(): Backend {
       if (j?.phase === "awaiting_consent") j.phase = "installing";
     },
     cancelJob: async (jobId) => {
+      if (runs.cancelRun(jobId)) return;
       const j = jobs.find((x) => x.id === jobId);
       if (j) {
         j.phase = "cancelled";

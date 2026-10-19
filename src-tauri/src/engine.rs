@@ -896,7 +896,7 @@ mod workflow_tests;
 /// container runs). Listing and output come from the shared store.
 pub struct RoutedJobs {
     pub engine: InstallEngine,
-    pub runner: Arc<crate::adapters::container_runner::ContainerToolRunner>,
+    pub runner: Arc<crate::adapters::launch_router::LaunchRouter>,
 }
 
 #[async_trait]

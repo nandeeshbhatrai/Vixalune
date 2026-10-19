@@ -1,0 +1,102 @@
+tool_id = "zap"
+title = "Learn OWASP ZAP: look for weaknesses in a web application"
+what_it_does = "ZAP (Zed Attack Proxy) is a free scanner for web applications. It first explores the site (the spider follows links), then actively tries requests that real attackers use to see whether the application reacts unsafely."
+problem_solved = "Web applications fail in common, well-known ways: missing security headers, unsafe cookies, reflected input, forgotten pages. ZAP checks for these in minutes so you can fix the cheap problems before anyone else finds them."
+requirements = [
+  "OWASP ZAP installed from the Tool Library (winget). It needs Java; the Windows installer normally brings its own, but if ZAP complains about Java, install a current Java runtime.",
+  "A web application you own or have written permission to test. The practice application on this computer is always allowed.",
+  "For the exercise: the practice web application started in Learning Labs.",
+]
+authorization_warning = "Active scanning sends many attack-like requests and can disturb or break the target. Only scan applications you own or have written permission to test. Vixalune's scope checks are a safety net, not legal permission."
+
+[[first_run]]
+title = "Start the practice application"
+body = "Open Learning Labs and start the Practice web application. It is deliberately weak and runs only on this computer."
+
+[[first_run]]
+title = "Open the ZAP launcher"
+body = "Go to Run a Tool, choose OWASP ZAP and pick the quick scan. The URL is pre-filled with the practice application's address."
+profile = "quick-scan"
+
+[[first_run]]
+title = "Check the scope and the warning"
+body = "The preview shows the target address and whether it is in scope. Because the URL starts with http, Vixalune also looks at where it redirects, and stops if any redirect leads outside your lab."
+profile = "quick-scan"
+
+[[first_run]]
+title = "Run the scan"
+body = "Press Run. ZAP prints progress while it crawls and probes. It can take several minutes. You can cancel at any time."
+profile = "quick-scan"
+
+[[first_run]]
+title = "Open the report"
+body = "When the run ends, open the run folder from the run's details. ZAP writes zap-report.html there. Alerts are grouped by risk level, each with an explanation and a suggested fix."
+
+[[parameters]]
+profile = "quick-scan"
+name = "url"
+explanation = "The address where scanning starts, such as http://127.0.0.1:18080/. Only http and https are accepted, never addresses with embedded user names or passwords. ZAP stays on this site."
+
+[example]
+profile = "quick-scan"
+output = '''
+Spider progress: 100%
+Active scan progress: 100%
+Report written: zap-report.html
+
+Alerts (illustrative list):
+  Medium  Content Security Policy (CSP) header not set
+  Medium  Missing anti-clickjacking header
+  Low     Cookie without HttpOnly / SameSite attribute
+  Low     X-Content-Type-Options header missing
+  Low     Server leaks version information
+'''
+interpretation = [
+  "This is an illustration, not a recording. Alert names and counts differ by ZAP version.",
+  "Risk levels (High, Medium, Low, Informational) say how serious ZAP thinks a finding is, not whether it is exploitable in your case.",
+  "Header and cookie alerts are cheap to fix by configuration. Reflected-input alerts (cross-site scripting) point at code that needs changing.",
+  "A finished scan with alerts is a successful run with findings. A failed run means ZAP itself did not complete.",
+]
+
+[[common_errors]]
+symptom = "zap.exe was not found"
+cause = "ZAP is not installed, or it is installed in a folder Vixalune does not know. The ZAP launch profile has not yet been verified on real hardware by the developers."
+fix = "Install ZAP from the Tool Library and try again. If it still cannot be found, report the folder ZAP was installed in."
+
+[[common_errors]]
+symptom = "Java is missing or too old"
+cause = "ZAP is a Java program."
+fix = "Install a current Java runtime and run the scan again."
+
+[[common_errors]]
+symptom = "The scan stops because the URL redirects outside your lab"
+cause = "The site answered with a redirect to another host. Vixalune does not let a scan follow that."
+fix = "If you own the final site, scan its own address instead. Otherwise do not scan it."
+
+[[common_errors]]
+symptom = "The scan took too long and was stopped"
+cause = "Active scans of large sites run longer than the profile's time limit."
+fix = "Scan the small practice application first, or a specific section of your own site."
+
+[exercise]
+title = "Scan the deliberately weak shop"
+lab = "practice-web"
+profile = "quick-scan"
+goal = "Find the weaknesses listed for the practice application and match each alert to its cause."
+steps = [
+  "Start the Practice web application in Learning Labs and read its list of deliberate weaknesses.",
+  "Open Run a Tool, choose OWASP ZAP and the quick scan, keep the default URL.",
+  "Read the preview, then press Run and wait for it to finish.",
+  "Open the report from the run folder.",
+  "For each weakness in the lab's list, find the alert that matches it.",
+]
+expected = "The report lists the missing security headers, the cookie without protective attributes and the version banner. With the spider's help it may also report the reflected search parameter. The exact alerts depend on your ZAP version."
+stretch = "Open the practice application in your browser, search for <b>hello</b> and see how the page reflects it. That is what ZAP's cross-site scripting alert is about."
+
+[[links]]
+label = "ZAP documentation (official)"
+url = "https://www.zaproxy.org/docs/"
+
+[[links]]
+label = "ZAP home page"
+url = "https://www.zaproxy.org"

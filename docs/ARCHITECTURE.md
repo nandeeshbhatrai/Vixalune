@@ -151,6 +151,53 @@ SetupEngine ── the only code that changes the system: WSL install (UAC), dis
 | Non-English Windows | Detection works from exit codes and table shape; some diagnoses rely on English message text and degrade to a generic command failure |
 | Windows older than build 19045 | Blocked |
 
+## 2d. Running tools, scope and learning (Phase 5)
+
+```
+UI (Run a Tool)  ->  preview_launch / launch_tool  ->  LaunchRouter
+                                                         |-- NativeToolRunner      (windows_native profiles)
+                                                         `-- ContainerToolRunner   (container profiles)
+                              both use RunSupport: build_command_with -> check_paths -> scope check -> run history
+```
+
+**Launch profiles are typed data.** A profile (see TOOL_MANIFEST_SCHEMA.md) declares typed parameters, an argument template, a timeout,
+the output format, whether the run uses the network and how its exit code is read. `build_command_with` turns the validated values into an
+argument array; there is no code path that concatenates text into a shell command. Lab placeholders in defaults (`{lab:web_url}`, ...) are
+replaced by the backend, never by the UI.
+
+**Execution** is a tracked job (`JobKind::Run`): `queued -> checking_prerequisites -> running -> succeeded | failed | cancelled`. The native runner
+locates an absolute executable (install record, the profile's known folders, then PATH), starts it unelevated in its own empty run folder
+(`<data>/runs/<job id>`) with the scrubbed environment plus the profile's fixed variables, streams redacted output into SQLite, and kills the process
+tree on timeout or cancel. Cancel is routed to whichever runner owns the job (`RoutedJobs`).
+
+**Outcome is separate from job phase.** `classify_outcome` maps (exit code, timeout, cancel, profile exit-code rules, findings patterns) to
+`clean | findings | failed | timed_out | cancelled`. "Completed with findings" is a success (Trivy and Semgrep exit 1 for findings; Nmap is detected by
+output pattern) and is shown as a result, never as an error.
+
+**Scope engine** (`domain/scope.rs`, `adapters/run_support.rs`):
+
+1. Targets are parsed strictly (`parse_target`): no alternate IP spellings (`2130706433`, `0x7f.1`, `127.1`), no lists, ranges, options, credentials in URLs, or control characters.
+2. Names are resolved by the OS resolver and *every* address is classified: loopback and your configured lab are allowed; private-network addresses outside the lab list need a tick;
+   public addresses need the host name typed; unspecified, multicast/reserved and unresolvable targets are refused. A lab *name* only counts if all its addresses are non-public.
+3. For plain-`http` URLs the backend follows redirects one hop at a time with a single `HEAD`, classifies each hop *before* contacting it and stops at the first hop that is not allowed;
+   a redirect out of the lab blocks the run. `https` redirects cannot be inspected (stated in the UI).
+4. The confirmation travels with the request (`RunApprovals.scope`) and is checked again at start with a fresh resolution; if the addresses changed since review the run is refused (DNS changes between review and start).
+5. Preview and start use the same code, so the UI cannot reach a state the backend would not accept.
+
+These are guardrails against mistakes, not legal authorisation.
+
+**Run history and retention.** `runs` (SQLite) holds one record per launch: command (secrets masked), targets, scope summary, tool version, times, exit code, outcome, run folder and
+the result path the user saved to. Output lives in `job_output` and expires separately. `settings.json` holds the lab list and two explicit retention periods (default 90 days of history,
+14 days of output; output `0` = deleted at the next start). Expired data is purged at start-up and when settings change; "Delete history and output now" purges immediately. Files the user chose to save are never deleted.
+
+**Saving results.** The webview asks the backend to save a run's stored output. The backend opens the OS *Save as* dialog (`tauri-plugin-dialog`, called from Rust), validates the chosen path
+(allow-listed document extensions only, no system/start-up folders, no devices, streams or UNC paths) and writes the file. The webview never sees or supplies a path or the text.
+
+**Learning mode.** `learning/*.toml` hold one tutorial per tool (Nmap, ZAP, Semgrep, Trivy), embedded in the binary and validated against the tool's manifest when loaded: profiles and parameters must exist,
+links must be plain `https` on the tool's official sites, the exercise must use a known lab, and an authorization warning is mandatory. The UI opens links by index; the address comes from the validated tutorial.
+`adapters/practice_lab.rs` provides the labs: a deliberately vulnerable web application (fixed embedded pages, bound to `127.0.0.1`, loopback-only peers, bounded connections and request sizes,
+never reads files, executes input or contacts other hosts) and a sample project of insecure files that are never executed (default location `%USERPROFILE%\Vixalune\labs`, because mounts and scanners rightly refuse AppData).
+
 ## 3. Interfaces (src-tauri/src/ports.rs)
 
 | Interface | Responsibility | Phase 1 implementation |

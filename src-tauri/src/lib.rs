@@ -16,6 +16,8 @@ use adapters::{
     elevation::UacElevatedRunner,
     executor::SystemCommandExecutor,
     host_facts::WindowsHostFacts,
+    launch_router::LaunchRouter,
+    learning::LearningRegistry,
     link_opener::SystemLinkOpener,
     locator::SystemExecutableLocator,
     platform_detector::SystemPlatformDetector,
@@ -23,7 +25,12 @@ use adapters::{
     resolver::BasicDependencyResolver,
     setup::SetupEngine,
     sqlite_store::SqliteJobStore,
-    unimplemented::UnimplementedLabManager,
+    native_runner::NativeToolRunner,
+    practice_lab::{PracticeLabs, DEFAULT_PORT},
+    result_saver::DialogSaver,
+    run_support::RunSupport,
+    settings_store::FileSettings,
+    system_net::{HttpRedirectProbe, SystemNameResolver},
     winget::WingetAdapter,
     wsl::WslAptAdapter,
 };
@@ -32,7 +39,7 @@ use config::AppConfig;
 use domain::activity::ActivityKind;
 use domain::jobs::Capabilities;
 use engine::{EngineDeps, InstallEngine, RoutedJobs};
-use ports::{EnvironmentDetector, InstallationManager, InstallerAdapter, PlatformDetector, SetupManager, ToolRunner, TrustLevel};
+use ports::{EnvironmentDetector, InstallationManager, InstallerAdapter, LabManager, LearningCatalog, PlatformDetector, ResultSaver, RunHistory, SettingsProvider, SetupManager, ToolRunner, TrustLevel};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
@@ -88,16 +95,46 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
     for job in engine.recover()? {
         tracing::warn!("closed interrupted job {} for {}", job.id, job.tool_id);
     }
-    let runner = Arc::new(ContainerToolRunner::new(
-        registry.clone(),
-        executor.clone(),
-        locator.clone(),
-        container,
-        store.clone(),
-        activity.clone(),
-        config.runtime.approved_registries.clone(),
-        home,
-    ));
+    // Learning labs, user settings and everything a run needs besides the tool itself.
+    let labs = Arc::new(PracticeLabs::new(&config.storage.labs_dir, DEFAULT_PORT));
+    if let Err(e) = labs.ensure_sample_project() {
+        tracing::warn!("could not create the sample project: {e}");
+    }
+    let settings = Arc::new(FileSettings::open(data_dir.join("settings.json")));
+    let support = Arc::new(RunSupport {
+        settings: settings.clone() as Arc<dyn SettingsProvider>,
+        labs: labs.clone(),
+        history: store.clone() as Arc<dyn RunHistory>,
+        resolver: Arc::new(SystemNameResolver),
+        probe: Arc::new(HttpRedirectProbe),
+        runs_dir: data_dir.join("runs"),
+    });
+    match support.purge_expired() {
+        Ok(r) if r.runs_deleted + r.output_lines_deleted + r.jobs_deleted > 0 => tracing::info!("retention purge removed {} run(s), {} output line(s)", r.runs_deleted, r.output_lines_deleted),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("retention purge failed: {e}"),
+    }
+    support.remove_stale_run_dirs();
+
+    let container_runner = Arc::new(
+        ContainerToolRunner::new(
+            registry.clone(),
+            executor.clone(),
+            locator.clone(),
+            container,
+            store.clone(),
+            activity.clone(),
+            config.runtime.approved_registries.clone(),
+            home.clone(),
+        )
+        .with_support(support.clone()),
+    );
+    let native_runner = Arc::new(NativeToolRunner::new(registry.clone(), executor.clone(), locator.clone(), store.clone(), activity.clone(), support.clone(), home));
+    let runner = Arc::new(LaunchRouter::new(registry.clone(), container_runner, native_runner, support.clone()));
+    let learning = LearningRegistry::bundled(registry.as_ref());
+    for r in &learning.rejected {
+        tracing::warn!("rejected tutorial: {r}");
+    }
     let setup = SetupEngine::new(platform.clone() as Arc<dyn PlatformDetector>, executor, Arc::new(UacElevatedRunner), locator, store.clone(), activity.clone());
 
     let capabilities = Capabilities {
@@ -106,7 +143,7 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         verify: true,
         launch: true,
         jobs: true,
-        labs: false,
+        labs: true,
         installed_detection: true,
         install_methods: engine.supported_methods(),
     };
@@ -127,8 +164,15 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         resolver: Arc::new(BasicDependencyResolver),
         installer: Arc::new(engine.clone()) as Arc<dyn InstallationManager>,
         runner: runner.clone() as Arc<dyn ToolRunner>,
-        jobs: Arc::new(RoutedJobs { engine, runner }),
-        labs: Arc::new(UnimplementedLabManager),
+        jobs: Arc::new(RoutedJobs { engine, runner: runner.clone() }),
+        labs: labs as Arc<dyn LabManager>,
+        launch: runner.clone(),
+        store: store.clone() as Arc<dyn ports::JobStore>,
+        history: store as Arc<dyn RunHistory>,
+        settings: settings as Arc<dyn SettingsProvider>,
+        saver: Arc::new(DialogSaver::new(app.handle().clone())) as Arc<dyn ResultSaver>,
+        learning: Arc::new(learning) as Arc<dyn LearningCatalog>,
+        support,
         links: Arc::new(SystemLinkOpener),
         capabilities,
         activity,
@@ -143,6 +187,7 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
 pub fn run() {
     logging::init();
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let state = build_state(app)?;
             app.manage(state);
@@ -171,6 +216,21 @@ pub fn run() {
             commands::cancel_restart,
             commands::open_setup_link,
             commands::list_labs,
+            commands::start_lab,
+            commands::stop_lab,
+            commands::get_launch_defaults,
+            commands::get_job,
+            commands::get_run_output,
+            commands::list_runs,
+            commands::get_run,
+            commands::save_run_output,
+            commands::open_run_folder,
+            commands::get_settings,
+            commands::update_settings,
+            commands::purge_history_now,
+            commands::list_tutorials,
+            commands::get_tutorial,
+            commands::open_tutorial_link,
             commands::open_link,
             commands::get_install_plan,
             commands::approve_job,

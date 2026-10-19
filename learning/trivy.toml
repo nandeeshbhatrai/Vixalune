@@ -1,0 +1,107 @@
+tool_id = "trivy"
+title = "Learn Trivy: find known vulnerabilities and leaked secrets"
+what_it_does = "Trivy reads a project's dependency lists (for example requirements.txt or package-lock.json) and compares every library version with a public database of known vulnerabilities. It can also search files for secrets such as access keys."
+problem_solved = "Most applications are mostly other people's code. When one of those libraries has a published vulnerability, you are exposed until you update. Trivy tells you which libraries, how severe, and which version fixes it."
+requirements = [
+  "Trivy installed from the Tool Library (winget).",
+  "A project folder you own. The sample project that Vixalune creates is safe to scan.",
+  "Internet access on the first run: Trivy downloads its public vulnerability database. It does not contact the project's hosts.",
+]
+authorization_warning = "Scan only projects you own or have permission to examine. Findings can reveal weaknesses in software other people depend on, so handle them responsibly."
+
+[[first_run]]
+title = "Create the sample project"
+body = "Open Learning Labs and start the Sample code project. It contains dependency lists with old versions and a fake credential."
+
+[[first_run]]
+title = "Open the Trivy launcher"
+body = "Go to Run a Tool, choose Trivy and pick \"Scan a project folder\". The folder field is pre-filled with the sample project."
+profile = "scan-folder"
+
+[[first_run]]
+title = "Choose how much to see"
+body = "The severity list decides which findings are shown. Start with HIGH and CRITICAL so the list stays short, then widen it."
+profile = "scan-folder"
+
+[[first_run]]
+title = "Run the scan"
+body = "Press Run. The first run downloads the vulnerability database, so it takes longer. Later runs are quick."
+profile = "scan-folder"
+
+[[first_run]]
+title = "Read the tables"
+body = "Each row is a library, a vulnerability ID, a severity, the version you have and the version that fixes it. Trivy exits with code 1 when it finds something; Vixalune shows that as a successful run with findings."
+
+[[parameters]]
+profile = "scan-folder"
+name = "folder"
+explanation = "The project folder to read. It must exist on this computer. System folders and credential folders are refused. Trivy only reads it; nothing is changed."
+
+[[parameters]]
+profile = "scan-folder"
+name = "severity"
+explanation = "Which severities to list: CRITICAL, HIGH, MEDIUM or LOW (a choice is a minimum). Lower levels find more but add noise."
+
+[example]
+profile = "scan-folder"
+output = '''
+requirements.txt (pip)
+Total: 5 (HIGH: 3, CRITICAL: 2)
+
+| Library | Vulnerability  | Severity | Installed | Fixed        |
+|---------|----------------|----------|-----------|--------------|
+| flask   | CVE-xxxx-xxxxx | HIGH     | 0.12.2    | (fixed ver.) |
+| jinja2  | CVE-xxxx-xxxxx | CRITICAL | 2.10      | (fixed ver.) |
+
+config.env (secrets)
+HIGH: AWS Access Key ID (may depend on Trivy's handling of documented example keys)
+'''
+interpretation = [
+  "This is an illustration, not a recording. Real output names real vulnerability IDs and differs by database date.",
+  "Installed is what your project uses; Fixed is the first version without the problem. Updating to it is usually the remedy.",
+  "Severity is a general rating. Whether it matters depends on whether your code uses the vulnerable feature.",
+  "Trivy may skip well-known example keys. If the fake key is not reported, that is a useful thing to notice, not a failure.",
+]
+
+[[common_errors]]
+symptom = "trivy.exe was not found"
+cause = "Trivy is not installed, or the installer has not finished."
+fix = "Install Trivy from the Tool Library, wait for the job to succeed and try again."
+
+[[common_errors]]
+symptom = "Unable to download the vulnerability database"
+cause = "No internet access on the first run, a proxy, or the database host is rate limiting."
+fix = "Check the connection and try again later. The database is cached after the first success."
+
+[[common_errors]]
+symptom = "The folder was refused"
+cause = "System folders, whole profile folders and credential folders cannot be scanned."
+fix = "Choose the project folder itself."
+
+[[common_errors]]
+symptom = "The run shows findings but also exit code 1"
+cause = "That is how Trivy says it found something."
+fix = "Nothing to fix. Vixalune treats it as a completed run with findings."
+
+[exercise]
+title = "Fix a vulnerable dependency list"
+lab = "sample-code"
+profile = "scan-folder"
+goal = "Scan the sample project, pick one vulnerable library and work out which version removes the finding."
+steps = [
+  "Start the Sample code project in Learning Labs.",
+  "Run \"Scan a project folder\" with the default folder and severity HIGH,CRITICAL.",
+  "Pick one library from requirements.txt or package-lock.json in the results.",
+  "Write down its Installed and Fixed versions.",
+  "Widen the severity to LOW,MEDIUM,HIGH,CRITICAL and run again to see how the list grows.",
+]
+expected = "Findings for the old Flask, Requests, Jinja2 and lodash versions, each with a fixed version. The fake access key in config.env may be reported as a secret."
+stretch = "Copy the sample project to another folder, edit the version numbers in requirements.txt to the fixed ones, scan the copy and compare."
+
+[[links]]
+label = "Trivy documentation (official)"
+url = "https://trivy.dev/latest/docs/"
+
+[[links]]
+label = "Trivy home page"
+url = "https://trivy.dev"

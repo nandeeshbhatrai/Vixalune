@@ -3,7 +3,7 @@
 
 use crate::domain::process::{CancellationToken, OutputStream};
 use crate::domain::{AppError, AppResult};
-use crate::ports::{CommandExecutor, CommandOutcome, CommandResult, CommandSpec, LineSink};
+use crate::ports::{CommandExecutor, CommandOutcome, CommandResult, CommandSpec, ExecOptions, LineSink};
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::process::Stdio;
@@ -111,6 +111,10 @@ async fn kill_tree(pid: u32) {
 #[async_trait]
 impl CommandExecutor for SystemCommandExecutor {
     async fn run(&self, spec: CommandSpec, sink: &dyn LineSink, cancel: &CancellationToken) -> AppResult<CommandResult> {
+        self.run_in(spec, ExecOptions::default(), sink, cancel).await
+    }
+
+    async fn run_in(&self, spec: CommandSpec, opts: ExecOptions, sink: &dyn LineSink, cancel: &CancellationToken) -> AppResult<CommandResult> {
         if !spec.program.is_absolute() {
             return Err(AppError::Validation(format!("refusing to run non-absolute program '{}'", spec.program.display())));
         }
@@ -125,6 +129,15 @@ impl CommandExecutor for SystemCommandExecutor {
         // PATH is passed through so child installers can find system tools; it holds no secrets.
         if let Some(p) = std::env::var_os("PATH") {
             cmd.env("PATH", p);
+        }
+        if let Some(cwd) = &opts.cwd {
+            if !cwd.is_absolute() || !cwd.is_dir() {
+                return Err(AppError::Validation(format!("the working folder '{}' must be an existing absolute folder", cwd.display())));
+            }
+            cmd.current_dir(cwd);
+        }
+        for (k, v) in &opts.env {
+            cmd.env(k, v);
         }
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -248,6 +261,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runs_in_the_requested_folder_with_extra_environment() {
+        let sink = Collect::default();
+        let dir = tempfile::tempdir().unwrap();
+        let cmd = std::env::var_os("ComSpec").map(PathBuf::from).unwrap_or_else(|| system32("cmd.exe"));
+        let spec = CommandSpec { program: cmd, args: vec!["/C".into(), "cd && echo %VIXALUNE_TEST_VALUE%".into()], timeout: Duration::from_secs(20) };
+        let opts = ExecOptions { cwd: Some(dir.path().to_path_buf()), env: vec![("VIXALUNE_TEST_VALUE".into(), "hello-from-profile".into())] };
+        let r = SystemCommandExecutor.run_in(spec, opts, &sink, &CancellationToken::new()).await.unwrap();
+        assert_eq!(r.outcome, CommandOutcome::Exited(0));
+        let lines = sink.0.lock().unwrap().join("\n");
+        assert!(lines.contains("hello-from-profile"), "{lines}");
+        assert!(lines.to_lowercase().contains(&dir.path().file_name().unwrap().to_string_lossy().to_lowercase()), "{lines}");
+        // A relative or missing working folder is refused.
+        let bad = ExecOptions { cwd: Some(PathBuf::from("relative")), env: vec![] };
+        let spec = CommandSpec { program: system32("whoami.exe"), args: vec![], timeout: Duration::from_secs(5) };
+        assert!(SystemCommandExecutor.run_in(spec, bad, &sink, &CancellationToken::new()).await.is_err());
+    }
+
+    #[tokio::test]
     async fn refuses_relative_programs_and_missing_files() {
         let sink = Collect::default();
         let rel = CommandSpec { program: PathBuf::from("whoami.exe"), args: vec![], timeout: Duration::from_secs(5) };
@@ -267,3 +298,4 @@ mod tests {
         assert!(!lines.contains("\\"), "whoami output (DOMAIN\\user) must not appear: {lines}");
     }
 }
+

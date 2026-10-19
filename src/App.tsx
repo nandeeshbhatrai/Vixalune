@@ -6,6 +6,8 @@ import { Dashboard } from "@/pages/Dashboard";
 import { InstalledTools } from "@/pages/InstalledTools";
 import { Jobs } from "@/pages/Jobs";
 import { Labs } from "@/pages/Labs";
+import { LearnIndex, TutorialPage } from "@/pages/Learn";
+import { RunPage } from "@/pages/RunPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SetupWizard } from "@/pages/SetupWizard";
 import { ToolDetail } from "@/pages/ToolDetail";
@@ -20,6 +22,10 @@ export function AppRoutes({ firstRunRedirect = false }: { firstRunRedirect?: boo
         <Route path="catalog/:id" element={<ToolDetail />} />
         <Route path="installed" element={<InstalledTools />} />
         <Route path="jobs" element={<Jobs />} />
+        <Route path="run" element={<RunPage />} />
+        <Route path="run/:toolId" element={<RunPage />} />
+        <Route path="learn" element={<LearnIndex />} />
+        <Route path="learn/:toolId" element={<TutorialPage />} />
         <Route path="labs" element={<Labs />} />
         <Route path="setup" element={<SetupWizard />} />
         <Route path="activity" element={<ActivityPage />} />

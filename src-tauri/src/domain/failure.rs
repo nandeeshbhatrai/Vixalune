@@ -142,6 +142,8 @@ pub enum OutputSource {
     LinuxPackageManager,
     Docker,
     Winget,
+    /// A security tool launched by the user (nmap, trivy, ...).
+    Tool,
 }
 
 /// Diagnose command output. `None` means "nothing recognised"; callers then show the raw output.
@@ -156,7 +158,7 @@ pub fn classify(source: OutputSource, exit_code: Option<i32>, lines: &[String]) 
         OutputSource::Wsl => L::Wsl,
         OutputSource::LinuxPackageManager => L::PackageManager,
         OutputSource::Docker => L::ContainerRuntime,
-        OutputSource::Winget => L::Windows,
+        OutputSource::Winget | OutputSource::Tool => L::Windows,
     };
 
     // Highest priority: problems that make everything else meaningless.
@@ -195,7 +197,7 @@ pub fn classify(source: OutputSource, exit_code: Option<i32>, lines: &[String]) 
     if has(&text, &arch) {
         return Some(PlatformFailure::new(K::UnsupportedArchitecture, layer_default, evidence(&arch)));
     }
-    let perm = ["0x80070005", "access is denied", "permission denied", "requires elevation", "run as administrator", "operation not permitted", "got permission denied while trying to connect to the docker"];
+    let perm = ["0x80070005", "access is denied", "permission denied", "requires elevation", "run as administrator", "operation not permitted", "requires root privileges", "requires administrator", "must be run as administrator", "got permission denied while trying to connect to the docker"];
     if has(&text, &perm) {
         return Some(PlatformFailure::new(K::MissingPermissions, layer_default, evidence(&perm)));
     }
@@ -307,4 +309,5 @@ mod tests {
         }
     }
 }
+
 

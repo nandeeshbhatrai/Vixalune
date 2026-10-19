@@ -365,12 +365,21 @@ describe("jobs", () => {
 describe("labs and activity", () => {
   it("shows an honest empty state for labs", async () => {
     renderApp("/labs", readOnlyBackend());
-    expect(await screen.findByText("No labs available yet")).toBeInTheDocument();
+    expect(await screen.findByText("No labs available")).toBeInTheDocument();
   });
 
-  it("disables lab start when unsupported", async () => {
-    renderApp("/labs");
-    expect(await screen.findByRole("button", { name: "Start lab" })).toBeDisabled();
+  it("starts and stops the practice web application", async () => {
+    const backend = createDemoBackend();
+    const startLab = vi.fn(backend.startLab);
+    const stopLab = vi.fn(backend.stopLab);
+    renderApp("/labs", { ...backend, startLab, stopLab });
+    expect(await screen.findByText("Practice web application")).toBeInTheDocument();
+    expect(screen.getByText(/No security headers/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Start lab" }));
+    expect(startLab).toHaveBeenCalledWith("practice-web");
+    await userEvent.click(await screen.findByRole("button", { name: "Stop lab" }));
+    expect(stopLab).toHaveBeenCalledWith("practice-web");
+    expect(await screen.findByRole("button", { name: "Start lab" })).toBeInTheDocument();
   });
 
   it("lists activity and handles an empty log", async () => {

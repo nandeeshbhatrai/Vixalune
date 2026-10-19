@@ -24,6 +24,10 @@ import type {
   Prerequisite,
   Readiness,
   RuntimeKind,
+  Locality,
+  NetworkActivity,
+  OutputFormat,
+  RunOutcome,
 } from "@/domain/types";
 
 export const CATEGORY_LABEL: Record<Category, string> = {
@@ -182,3 +186,33 @@ export function formatTime(iso: string): string {
 
 
 
+
+// ---------------------------------------------------------------- phase 5: runs and scope
+
+
+/** A run that finished with findings is a success: the tool worked. Only "failed" and "timed out" are errors. */
+export const RUN_OUTCOME_META: Record<RunOutcome, { label: string; tone: Tone; explanation: string }> = {
+  clean: { label: "Completed, nothing reported", tone: "success", explanation: "The tool ran to the end and reported nothing of concern." },
+  findings: { label: "Completed with findings", tone: "info", explanation: "The tool ran to the end and reported results (for example open ports or vulnerabilities). This is not an error." },
+  failed: { label: "Failed", tone: "danger", explanation: "The tool could not run or ended with an exit code that this profile does not treat as success." },
+  timed_out: { label: "Timed out", tone: "danger", explanation: "The run exceeded its time limit and was stopped." },
+  cancelled: { label: "Cancelled", tone: "neutral", explanation: "You stopped the run." },
+};
+
+export const LOCALITY_LABEL: Record<Locality, string> = {
+  loopback: "This computer",
+  lab: "Your lab",
+  private_network: "Private network (not on your lab list)",
+  public: "Public internet",
+  unspecified: "Not a specific target",
+  special: "Reserved address",
+  unresolvable: "Could not be resolved",
+};
+
+export const NETWORK_ACTIVITY_LABEL: Record<NetworkActivity, string> = {
+  none: "No network traffic",
+  probes_targets: "Sends traffic to the targets you named",
+  downloads_data: "Downloads data (for example a vulnerability database)",
+};
+
+export const OUTPUT_FORMAT_LABEL: Record<OutputFormat, string> = { text: "Plain text", json: "JSON", xml: "XML", html: "HTML report", sarif: "SARIF" };

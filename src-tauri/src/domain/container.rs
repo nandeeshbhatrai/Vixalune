@@ -128,6 +128,9 @@ pub struct RunApprovals {
     /// container port -> host port
     #[serde(default)]
     pub ports: HashMap<u16, u16>,
+    /// Confirmation for targets outside the lab (see `domain::scope`).
+    #[serde(default)]
+    pub scope: Option<super::scope::ScopeAck>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -336,7 +339,7 @@ mod tests {
     }
 
     fn approvals(src: &str, network: bool) -> RunApprovals {
-        RunApprovals { network, mounts: HashMap::from([("source".to_string(), src.to_string())]), ports: HashMap::new() }
+        RunApprovals { network, mounts: HashMap::from([("source".to_string(), src.to_string())]), ports: HashMap::new(), scope: None }
     }
 
     fn run(profile: &str, a: &RunApprovals) -> AppResult<DockerRun> {
@@ -531,4 +534,5 @@ mod tests {
         assert!(!p.validate().is_empty());
     }
 }
+
 

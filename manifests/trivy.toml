@@ -1,5 +1,5 @@
-schema_version = 2
-manifest_version = "1.0.0"
+﻿schema_version = 2
+manifest_version = "1.1.0"
 maintainer = "Vixalune catalog"
 id = "trivy"
 name = "Trivy"
@@ -60,3 +60,44 @@ executable = "trivy.exe"
 args = ["--version"]
 locations = ["{LocalAppData}\\Microsoft\\WinGet\\Links"]
 expect_output_contains = "Version"
+
+# ---------------------------------------------------------------- launch profiles
+
+[[launch_profiles]]
+id = "scan-folder"
+label = "Scan a project folder for known vulnerabilities and exposed secrets"
+description = "Reads the dependency lists and files in a folder on this computer. It does not scan other hosts. On first use it downloads Trivy's public vulnerability database."
+runtime = "windows_native"
+executable = "trivy.exe"
+network_activity = "downloads_data"
+timeout_secs = 900
+output_format = "text"
+exit_codes = { ok = [0], findings = [1] }
+expected_output = "Tables of vulnerable packages (library, vulnerability ID, severity, installed and fixed version) and any secrets found. Exit code 1 means findings, not a crash."
+args = [
+  { kind = "literal", value = "fs" },
+  { kind = "literal", value = "--no-progress" },
+  { kind = "literal", value = "--scanners" },
+  { kind = "literal", value = "vuln,secret" },
+  { kind = "option", param = "severity", flag = "--severity" },
+  { kind = "literal", value = "--exit-code" },
+  { kind = "literal", value = "1" },
+  { kind = "value", param = "folder" },
+]
+
+[[launch_profiles.parameters]]
+name = "folder"
+label = "Folder to scan"
+description = "A project folder you own, for example D:\\code\\my-app. System and credential folders are refused."
+required = true
+kind = { type = "path", path_kind = "directory", must_exist = true }
+default = "{lab:sample_folder}"
+
+[[launch_profiles.parameters]]
+name = "severity"
+label = "Report severities"
+description = "Which severities to list. Start with HIGH and CRITICAL."
+required = true
+kind = { type = "choice", options = ["CRITICAL", "HIGH,CRITICAL", "MEDIUM,HIGH,CRITICAL", "LOW,MEDIUM,HIGH,CRITICAL"] }
+default = "HIGH,CRITICAL"
+

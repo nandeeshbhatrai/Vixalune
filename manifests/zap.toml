@@ -1,5 +1,5 @@
-schema_version = 2
-manifest_version = "1.0.0"
+﻿schema_version = 2
+manifest_version = "1.1.0"
 maintainer = "Vixalune catalog"
 id = "zap"
 name = "OWASP ZAP"
@@ -54,3 +54,36 @@ can_uninstall = true
 timeout_secs = 30
 [[verify.checks]]
 kind = "package_installed"
+
+# ---------------------------------------------------------------- launch profiles
+# UNVERIFIED on real hardware: the install folder, the executable name and the command-line options below follow
+# the ZAP documentation (-cmd, -quickurl, -quickout, -quickprogress) but have not been run by Vixalune.
+# Verification above only confirms winget's package record, so a wrong guess shows up as "not found", never as success.
+
+[[launch_profiles]]
+id = "quick-scan"
+label = "Quick scan of a web application (spider + active scan, writes an HTML report)"
+description = "ZAP crawls the site and actively probes it for common problems. This sends many requests, so use it only on your own practice application or a site you are authorised to test."
+runtime = "windows_native"
+executable = "zap.exe"
+locations = ["{ProgramFiles}\\ZAP\\Zed Attack Proxy", "{ProgramFilesX86}\\ZAP\\Zed Attack Proxy"]
+network_activity = "probes_targets"
+timeout_secs = 1800
+output_format = "html"
+expected_output = "Progress messages, then an HTML report (zap-report.html) in the run folder listing alerts by risk level."
+args = [
+  { kind = "literal", value = "-cmd" },
+  { kind = "option", param = "url", flag = "-quickurl" },
+  { kind = "run_file", name = "zap-report.html", flag = "-quickout" },
+  { kind = "literal", value = "-quickprogress" },
+]
+
+[[launch_profiles.parameters]]
+name = "url"
+label = "Web application URL"
+description = "An http:// or https:// address, for example the practice application shown in Learning Labs."
+required = true
+kind = { type = "url" }
+default = "{lab:web_url}"
+
+

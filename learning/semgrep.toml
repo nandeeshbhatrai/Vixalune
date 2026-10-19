@@ -1,0 +1,102 @@
+tool_id = "semgrep"
+title = "Learn Semgrep: find risky code patterns"
+what_it_does = "Semgrep reads source code and reports places that match a rule, for example a call that runs text as code or a password written into a file. Rules look like the code they describe, so they are easy to read and write."
+problem_solved = "Many security bugs are repeat mistakes. Semgrep catches known bad patterns as you write the code, long before the program runs, and it does not need to run or even build the project."
+requirements = [
+  "Semgrep installed from the Tool Library. It runs inside a container, so Docker Desktop must be installed and running (see Setup).",
+  "A folder of code you own. The sample project that Vixalune creates for exercises is safe to scan.",
+  "Vixalune asks you to approve the folder before each run. The container sees it read-only.",
+]
+authorization_warning = "Only analyse code you own or have permission to examine. The sample project is intentionally insecure and is never executed. Do not run its files."
+
+[[first_run]]
+title = "Create the sample project"
+body = "Open Learning Labs and start the Sample code project. Vixalune writes a few small, insecure files into a folder you can open."
+
+[[first_run]]
+title = "Open the Semgrep launcher"
+body = "Go to Run a Tool, choose Semgrep and pick \"Scan the practice code project (offline)\"."
+profile = "scan-sample"
+
+[[first_run]]
+title = "Approve what the container may see"
+body = "The preview lists the image, the network setting (none), the memory and CPU limits and the one folder that will be mounted read-only. Approve it only if it is the folder you expect."
+profile = "scan-sample"
+
+[[first_run]]
+title = "Run the scan"
+body = "Press Run. The scan is quick. The output lists each finding with the rule, the file and the line."
+profile = "scan-sample"
+
+[[first_run]]
+title = "Read the findings"
+body = "Exit code 1 from Semgrep means findings were found, which Vixalune shows as a successful run with findings. Open app.py next to the report and look at each flagged line."
+
+[[parameters]]
+profile = "scan-local"
+name = "config"
+explanation = "The rules file to use, as a path inside the mounted folder (the folder appears as /src in the container). Rules are plain YAML you can read and change."
+
+[example]
+profile = "scan-sample"
+output = '''
+Ran 3 rules on 6 files: 3 findings.
+
+app.py
+  practice-hardcoded-password
+    A password is written in the source code. Load secrets from the environment or a secret store.
+      4| PASSWORD = "hunter2-practice"
+
+  practice-eval-of-input
+    eval() runs whatever text it is given. If a user controls that text, they control your program.
+      8| return eval(user_input)
+'''
+interpretation = [
+  "This is an illustration, not a recording. The layout differs by Semgrep version.",
+  "Each finding names the rule that matched, explains the risk in a sentence, and shows the exact line.",
+  "A finding is a lead, not a verdict: read the code and decide whether it is really reachable and exploitable.",
+  "\"0 findings\" only means these rules found nothing, not that the code is secure.",
+]
+
+[[common_errors]]
+symptom = "The container engine is not running"
+cause = "Semgrep runs in Docker, and Docker Desktop is stopped or not installed."
+fix = "Open Setup, follow the Docker readiness steps, start Docker Desktop and try again."
+
+[[common_errors]]
+symptom = "Install Semgrep first; its image has not been downloaded"
+cause = "Runs never download images on their own."
+fix = "Install Semgrep from the Tool Library, then run again."
+
+[[common_errors]]
+symptom = "The rules file was not found"
+cause = "The path in the config field does not exist inside the mounted folder."
+fix = "Use a path that starts with /src and exists in the folder you approved, for example /src/.semgrep.yml."
+
+[[common_errors]]
+symptom = "The folder was refused"
+cause = "System folders, your whole profile folder and credential folders cannot be mounted."
+fix = "Choose a specific project folder."
+
+[exercise]
+title = "Find three planted mistakes"
+lab = "sample-code"
+profile = "scan-sample"
+goal = "Match each Semgrep finding to the line of code that caused it, and say how you would fix it."
+steps = [
+  "Start the Sample code project in Learning Labs and open its folder.",
+  "Read app.py without running it and guess where the problems are.",
+  "Run \"Scan the practice code project (offline)\" and approve the sample folder.",
+  "Compare the findings with your guesses.",
+  "For each finding write one sentence on how to fix it (for example: pass an argument list instead of using a shell).",
+]
+expected = "Three findings in app.py: a hard-coded password, eval() applied to input, and a shell command built from input. All three come from the rules in .semgrep.yml."
+stretch = "Open .semgrep.yml, change a rule's message, and run the scan again to see how rules drive the output."
+
+[[links]]
+label = "Semgrep documentation (official)"
+url = "https://semgrep.dev/docs/"
+
+[[links]]
+label = "Semgrep home page"
+url = "https://semgrep.dev"

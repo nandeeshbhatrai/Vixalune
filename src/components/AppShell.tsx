@@ -1,4 +1,4 @@
-﻿import { Activity, BookOpen, Briefcase, LayoutDashboard, ListChecks, Settings, ShieldCheck, Wrench, type LucideIcon } from "lucide-react";
+﻿import { Activity, Briefcase, FlaskConical, GraduationCap, LayoutDashboard, ListChecks, Play, Settings, ShieldCheck, Wrench, type LucideIcon } from "lucide-react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { setupSeen } from "@/pages/SetupWizard";
 import { useBackend } from "@/infra/backendContext";
@@ -9,8 +9,10 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/catalog", label: "Tool Catalog", icon: Wrench },
   { to: "/installed", label: "Installed Tools", icon: ListChecks },
+  { to: "/run", label: "Run a Tool", icon: Play },
   { to: "/jobs", label: "Running Jobs", icon: Briefcase },
-  { to: "/labs", label: "Learning Labs", icon: BookOpen },
+  { to: "/learn", label: "Learn", icon: GraduationCap },
+  { to: "/labs", label: "Learning Labs", icon: FlaskConical },
   { to: "/activity", label: "Activity", icon: Activity },
   { to: "/setup", label: "Setup", icon: ShieldCheck },
   { to: "/settings", label: "Settings", icon: Settings },

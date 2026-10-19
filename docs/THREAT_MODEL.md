@@ -100,3 +100,23 @@ Known gaps and accepted risks:
 
 Residual risks: Docker Desktop's engine runs as root in its VM and members of `docker-users` are effectively administrators; Vixalune's own `docker`
 calls inherit that. WSL distributions are persistent Linux machines that can be modified by any tool inside them.
+
+## 8. Phase 5 update: running tools
+
+| Threat | Control | Status |
+|---|---|---|
+| Command injection through parameters | Typed parameters validated (never escaped); argument arrays only, no shell; options and control characters rejected; absolute program path; tests with `;`, `&`, newlines, leading `-`, `-iL file`, long values | Done |
+| Scanning something the user does not own | Default target is the local lab; strict target parsing; all resolved addresses classified; out-of-lab targets need a tick (private) or the typed host name (public); blocked classes can never run; confirmation re-checked at start | Done (guardrail, not authorisation) |
+| Alias and URL tricks (decimal/hex/short IPs, look-alike names, `user@host`, mapped IPv6) | Alternate spellings rejected; mapped addresses judged by the embedded IPv4; look-alike names are names and are resolved | Done |
+| Redirect out of scope | Plain-http redirects followed hop by hop and classified before contacting; first disallowed hop blocks the run. https redirects cannot be checked (stated) | Partly |
+| DNS changing between review and run | Addresses shown at confirmation must equal a fresh resolution at start | Done (not a guarantee against a tool re-resolving later) |
+| Privilege escalation | Runs never elevate; no raw-socket features are offered (Nmap uses connect scans); `allow_elevation` is false for runs | Done |
+| Runaway or hung processes | Per-profile timeout (max 3600 s), process-tree kill on timeout/cancel, one active job per tool | Done |
+| Tool writing outside its folder | Own empty run folder as working directory; only `run_file` arguments point into it. Native tools are not sandboxed: a native tool can still write wherever Windows lets the user write | Partly |
+| Secrets and sensitive output kept forever | Output redacted before storage; explicit retention (90/14 days default); purge at start and on demand; saved files are the user's | Done |
+| Hostile save locations | Backend-opened dialog; allow-listed extensions; system/start-up folders, devices, streams and UNC refused | Done |
+| Vulnerable practice server abused | Binds `127.0.0.1`, refuses non-loopback peers, fixed embedded content, bounded request size/time/connections, no file or process access, header injection refused in the redirect demo | Done |
+| Tutorial content pointing users somewhere unsafe | Tutorials validated against the manifest; official-site https links only; opened by index | Done |
+
+Residual risks: the scope check cannot know who owns a target; a tool can open its own connections after start (for example a scanner following links) and the page-level scope applies to the target given, not to every request ZAP makes;
+ZAP's command-line flags and install folder are unverified on real hardware.

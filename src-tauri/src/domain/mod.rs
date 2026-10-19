@@ -9,11 +9,17 @@ pub mod ids;
 pub mod install_state;
 pub mod jobs;
 pub mod lab;
+pub mod learning;
 pub mod manifest;
 pub mod paths;
 pub mod platform;
 pub mod process;
+pub mod runs;
+pub mod scope;
+pub mod settings;
 
 pub use errors::{AppError, AppResult};
 pub use ids::{LabId, OperationId, ProcessId, RunId, ToolId};
+
+
 

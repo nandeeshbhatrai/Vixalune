@@ -2,7 +2,7 @@
 
 A Windows desktop app for beginners to discover, install, run and learn about open-source security tools from one place. For **authorized testing and local labs only**.
 
-Status: **Phase 4** — platform integration. Environment readiness, a first-run Setup wizard, and adapters for winget, WSL 2 (apt) and local Docker containers on top of the Phase 3 engine. Only the winget path has been exercised against real software; the WSL and container paths are **mock-tested** because the development PC cannot run them (see [docs/MANUAL_INTEGRATION_TESTS.md](docs/MANUAL_INTEGRATION_TESTS.md)). Launching Windows/WSL tools and the verified-archive adapter are **not implemented**. See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). Screenshots (demo data) are in `docs/screenshots/`.
+Status: **Phase 5** — tool execution, guided parameters and learning mode. Tools run from a **Run a Tool** page using typed, ready-made launch profiles: you review the exact command, target and scope, run it, watch the output stream, and see whether it *failed* or *completed with findings*. Targets default to a local practice lab; anything else needs explicit confirmation. Each of Nmap, OWASP ZAP, Semgrep and Trivy has a tutorial, and **Learning Labs** provides a deliberately vulnerable web application (127.0.0.1 only) and a sample project of insecure code. Phases 3-4 (winget, WSL and container installers, Setup wizard) are unchanged. **Not yet run against real tools:** Nmap, ZAP and Trivy runs and Semgrep in a container are tested with simulated processes (the practice server and scope checks use real sockets); follow section G of [docs/MANUAL_INTEGRATION_TESTS.md](docs/MANUAL_INTEGRATION_TESTS.md) to verify them, ZAP's command-line flags and install folder in particular. See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). Screenshots (demo data) are in `docs/screenshots/`.
 
 | Doc | Purpose |
 |---|---|
@@ -48,6 +48,7 @@ The first `tauri:dev` compiles ~500 crates (a few minutes); later runs are incre
 
 ```
 manifests/        tool definitions (TOML, data only)
+learning/         one tutorial per tool (TOML, validated against the manifest)
 docs/             spec, architecture, threat model, manifest schema
 src/              React UI
   domain/         TS types mirroring Rust + Backend interface
@@ -63,7 +64,7 @@ e2e/              Playwright tests
 
 ## Data location
 
-`%APPDATA%\app.vixalune.desktop\` — `config.toml`, `vixalune.db` (redacted activity log). No telemetry; nothing leaves the machine.
+`%APPDATA%\app.vixalune.desktop\` — `config.toml`, `settings.json` (lab list and retention periods), `vixalune.db` (jobs, redacted output, run history, activity log) and `runs\<job id>\` (each run's own folder, for example ZAP reports). The practice material lives in `%USERPROFILE%\Vixalune\labs\`. No telemetry; nothing leaves the machine except what the tools you run send.
 
 ## What genuinely works (Windows 11, verified 2026-10-17)
 
@@ -77,8 +78,8 @@ e2e/              Playwright tests
 ## Tests
 
 ```bash
-npm test                      # 94 frontend tests
-cargo test --manifest-path src-tauri/Cargo.toml     # 185 Rust unit tests (simulated winget/wsl/docker, real SQLite)
+npm test                      # 115 frontend tests
+cargo test --manifest-path src-tauri/Cargo.toml     # 245 Rust unit tests (simulated winget/wsl/docker/tool processes, real SQLite, real practice server)
 npm run test:e2e              # Playwright, demo data
 ```
 
@@ -93,7 +94,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --test winget_integration -- --i
 
 ## Known limitations
 
-See "Known limitations" in the [product spec](docs/PRODUCT_SPEC.md). Notably: WSL and container paths are untested against real runtimes, only container tools can be launched, Nmap/Wireshark/ZAP installs are untested on real hardware, and there is no code signing or bundling.
+See "Known limitations" in the [product spec](docs/PRODUCT_SPEC.md). Notably: WSL and container paths are untested against real runtimes; native runs of Nmap, Trivy and ZAP and the ZAP flags are untested on real hardware; only Windows-native and container profiles can be launched (not WSL); the scope check is a guardrail (it cannot prove authorisation, and https redirects are not inspected); there is no code signing or bundling.
 
 Windows Smart App Control (when set to enforce) blocks freshly compiled unsigned programs, including cargo build scripts and test binaries. Developing Vixalune then requires turning it off yourself (it cannot be re-enabled without resetting Windows) or building elsewhere; Vixalune never changes this setting.
 

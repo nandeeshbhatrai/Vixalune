@@ -1,11 +1,10 @@
 ﻿import { CheckCircle2, CircleHelp, XCircle } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AsyncView } from "@/components/AsyncView";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { JobProgress } from "@/components/JobProgress";
-import { LaunchDialog } from "@/components/LaunchDialog";
 import { Button } from "@/components/ui/button";
 import { actionsFor, type ToolAction } from "@/domain/toolStatus";
 import type { CatalogEntry, InstallPlan } from "@/domain/types";
@@ -101,7 +100,7 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
   const [confirm, setConfirm] = useState<"install" | "uninstall" | null>(null);
   const [elevationOk, setElevationOk] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [launching, setLaunching] = useState(false);
+  const navigate = useNavigate();
 
   const caps = ws.core.status === "ready" ? ws.core.data.caps : null;
   const status = ws.statusOf(m.id);
@@ -153,7 +152,7 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
     clearError();
     setElevationOk(false);
     if (a === "install" || a === "uninstall") setConfirm(a);
-    else if (a === "launch") setLaunching(true);
+    else if (a === "launch") navigate(`/run/${m.id}`);
     else void perform(a);
   };
 
@@ -202,16 +201,6 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
         </p>
       ) : null}
       {error && !confirm && !activeJob ? <ErrorNotice error={error} /> : null}
-
-      <LaunchDialog
-        entry={entry}
-        open={launching}
-        onOpenChange={setLaunching}
-        onStarted={(msg) => {
-          setNotice(msg);
-          ws.refreshAll();
-        }}
-      />
 
       <ConfirmDialog
         open={confirm === "install"}

@@ -20,6 +20,8 @@ pub enum ActivityKind {
     LabStarted,
     LabStopped,
     SettingsChanged,
+    ResultSaved,
+    HistoryPurged,
     SetupStarted,
     SetupSucceeded,
     SetupFailed,

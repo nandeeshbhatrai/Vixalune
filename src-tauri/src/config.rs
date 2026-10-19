@@ -50,7 +50,9 @@ impl AppConfig {
         Self {
             storage: StorageConfig {
                 tools_dir: data_dir.join("tools"),
-                labs_dir: data_dir.join("labs"),
+                // Practice material lives in the user's own folder (not AppData, which scanners and container
+                // mounts rightly refuse), so learners can open it and point tools at it.
+                labs_dir: std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join("Vixalune").join("labs")).unwrap_or_else(|| data_dir.join("labs")),
                 database_path: data_dir.join("vixalune.db"),
             },
             runtime: RuntimeConfig { wsl_distribution: None, docker_executable: None, approved_registries: default_registries() },

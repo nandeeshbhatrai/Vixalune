@@ -256,6 +256,42 @@ pub enum ParamKind {
     Integer { min: i64, max: i64 },
     Boolean,
     Choice { options: Vec<String> },
+    /// A single IP address (a network target: subject to scope checks).
+    Ip,
+    /// An http(s) URL (a network target: subject to scope checks).
+    Url,
+    /// A TCP/UDP port number, 1-65535 (an integer value).
+    Port,
+    /// A port list such as `22,80,443,8000-8100`.
+    PortList { max_items: Option<usize> },
+    /// A folder or file on this computer. Protected system and credential folders are refused.
+    Path {
+        path_kind: PathKind,
+        #[serde(default)]
+        must_exist: bool,
+        #[serde(default)]
+        extensions: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PathKind {
+    File,
+    Directory,
+}
+
+impl ParamKind {
+    /// Kinds that name a network destination. They always go through the scope engine.
+    pub fn target_form(&self) -> Option<super::scope::TargetForm> {
+        use super::scope::TargetForm as F;
+        match self {
+            Self::Host => Some(F::Host),
+            Self::Ip => Some(F::Ip),
+            Self::Url => Some(F::Url),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,6 +319,8 @@ pub enum ArgTemplate {
     /// `flag` followed by the value, emitted only when the parameter has a value.
     #[serde(rename = "option")]
     OptionValue { param: String, flag: String },
+    /// A path to a file inside this run's own folder (for tools that write a report). `flag` is optional.
+    RunFile { name: String, flag: Option<String> },
 }
 
 /// A launch profile: one named way to start the tool.
@@ -308,6 +346,92 @@ pub struct RunSpec {
     /// Container profiles only: container ports that may be published to 127.0.0.1 (requires approval).
     #[serde(default)]
     pub ports: Vec<u16>,
+    /// Where the process starts. Default: a fresh per-run folder under the app data directory.
+    #[serde(default)]
+    pub working_dir: WorkingDir,
+    /// Hard time limit in seconds (default 600, at most 3600). The process tree is killed when it expires.
+    pub timeout_secs: Option<u32>,
+    #[serde(default)]
+    pub output_format: OutputFormat,
+    /// What network traffic the run causes. Profiles with target parameters must say `probes_targets`.
+    #[serde(default)]
+    pub network_activity: NetworkActivity,
+    /// How the exit code is read: which codes mean "completed" and which mean "completed with findings".
+    #[serde(default)]
+    pub exit_codes: ExitCodes,
+    /// Regular expressions; a match anywhere in the output means "findings" (for tools whose exit code cannot say).
+    #[serde(default)]
+    pub findings_patterns: Vec<String>,
+    /// Fixed, non-secret environment variables for this run.
+    #[serde(default)]
+    pub env: Vec<EnvVar>,
+    /// Extra folders (known-folder placeholders) searched for the executable, besides the install record and PATH.
+    #[serde(default)]
+    pub locations: Vec<String>,
+    /// A short plain-language description of the expected result, shown before running.
+    #[serde(default)]
+    pub expected_output: String,
+    /// Container profiles: folders suggested for the mounts (lab placeholders allowed); the user still approves them.
+    #[serde(default)]
+    pub suggested_mounts: Vec<MountSuggestion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MountSuggestion {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkingDir {
+    /// A new empty folder for this run (`<data>/runs/<id>`), the only place the run may write results.
+    #[default]
+    RunDir,
+    /// The tool's own install folder.
+    InstallDir,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputFormat {
+    #[default]
+    Text,
+    Json,
+    Xml,
+    Html,
+    Sarif,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkActivity {
+    #[default]
+    None,
+    /// Sends traffic to the targets the user names (scope rules apply).
+    ProbesTargets,
+    /// Downloads data (for example a vulnerability database) but does not touch user-named hosts.
+    DownloadsData,
+}
+
+fn default_ok_codes() -> Vec<i32> {
+    vec![0]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExitCodes {
+    #[serde(default = "default_ok_codes")]
+    pub ok: Vec<i32>,
+    #[serde(default)]
+    pub findings: Vec<i32>,
+}
+
+impl Default for ExitCodes {
+    fn default() -> Self {
+        Self { ok: default_ok_codes(), findings: vec![] }
+    }
 }
 
 fn yes() -> bool {
@@ -656,10 +780,58 @@ impl ToolManifest {
                         bad(known(param), format!("arg references unknown parameter '{param}'"));
                         bad(flag_ok(flag), format!("invalid flag '{flag}'"));
                     }
+                    ArgTemplate::RunFile { name, flag } => {
+                        bad(
+                            !name.is_empty() && name.len() <= 64 && !name.starts_with('.') && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')),
+                            format!("invalid run file name '{name}'"),
+                        );
+                        if let Some(f) = flag {
+                            bad(flag_ok(f), format!("invalid flag '{f}'"));
+                        }
+                    }
                 }
             }
         }
 
+        for run in &self.launch_profiles {
+            bad(run.timeout_secs.is_none_or(|t| (1..=3600).contains(&t)), format!("launch profile '{}': timeout_secs must be 1-3600", run.id));
+            bad(run.expected_output.len() <= 600 && clean_text(&run.expected_output), format!("launch profile '{}': expected_output is invalid", run.id));
+            bad(run.locations.len() <= 6, format!("launch profile '{}': at most 6 locations", run.id));
+            for l in &run.locations {
+                if let Err(e) = paths::parse_location(l) {
+                    bad(false, format!("launch profile '{}' location: {e}", run.id));
+                }
+            }
+            bad(run.findings_patterns.len() <= 8, format!("launch profile '{}': at most 8 findings_patterns", run.id));
+            for pat in &run.findings_patterns {
+                bad(
+                    pat.len() <= 200 && regex::RegexBuilder::new(pat).size_limit(64 * 1024).build().is_ok(),
+                    format!("launch profile '{}': invalid findings pattern '{pat}'", run.id),
+                );
+            }
+            let (ok, fnd) = (&run.exit_codes.ok, &run.exit_codes.findings);
+            bad(!ok.is_empty() && ok.len() <= 8 && fnd.len() <= 8, format!("launch profile '{}': exit_codes need 1-8 ok codes and at most 8 findings codes", run.id));
+            bad(ok.iter().all(|c| !fnd.contains(c)), format!("launch profile '{}': a code cannot be both ok and findings", run.id));
+            for e in validate_env(&run.env) {
+                bad(false, format!("launch profile '{}': {e}", run.id));
+            }
+            // Honest network labelling: target parameters mean traffic to those targets.
+            let has_target = run.parameters.iter().any(|p| p.kind.target_form().is_some());
+            bad(
+                !has_target || run.network_activity == NetworkActivity::ProbesTargets,
+                format!("launch profile '{}' has network target parameters, so network_activity must be \"probes_targets\"", run.id),
+            );
+            bad(
+                run.network_activity != NetworkActivity::ProbesTargets || has_target,
+                format!("launch profile '{}' says it probes targets but has no target parameter", run.id),
+            );
+            if run.runtime == RuntimeKind::Container {
+                bad(
+                    run.network_activity == NetworkActivity::None || run.needs_network,
+                    format!("launch profile '{}': a container profile with network activity must set needs_network (so the user approves it)", run.id),
+                );
+            }
+        }
         if let Some(cp) = &self.container {
             for e in cp.validate() {
                 bad(false, format!("container: {e}"));
@@ -693,6 +865,26 @@ impl ToolManifest {
     pub fn profile(&self, id: &str) -> Option<&RunSpec> {
         self.launch_profiles.iter().find(|p| p.id == id)
     }
+}
+
+/// Fixed environment variables for a run: uppercase names, no secret-looking names, short values.
+pub fn validate_env(env: &[EnvVar]) -> Vec<String> {
+    let mut e = Vec::new();
+    if env.len() > 16 {
+        e.push("at most 16 env entries".to_string());
+    }
+    for v in env {
+        let name_ok = !v.name.is_empty() && v.name.len() <= 64 && v.name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') && !v.name.starts_with(|c: char| c.is_ascii_digit());
+        let upper = v.name.to_ascii_uppercase();
+        let secretish = ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "API_KEY", "APIKEY", "CREDENTIAL", "PRIVATE"].iter().any(|k| upper.contains(k));
+        if !name_ok || secretish {
+            e.push(format!("env name '{}' is invalid or looks like a secret (secrets are never put in manifests)", v.name));
+        }
+        if v.value.len() > 256 || v.value.chars().any(|c| c.is_control()) {
+            e.push(format!("env value for '{}' is invalid", v.name));
+        }
+    }
+    e
 }
 
 impl ContainerPolicy {
@@ -775,6 +967,72 @@ pub struct CommandPreview {
     pub display: String,
 }
 
+/// Lab placeholders (`{lab:web_host}`, ...) are replaced by the runner with real values before validation.
+pub const LAB_PLACEHOLDERS: &[&str] = &["{lab:web_host}", "{lab:web_url}", "{lab:web_port}", "{lab:sample_folder}", "{lab:sample_rules}"];
+
+pub fn is_placeholder(s: &str) -> bool {
+    LAB_PLACEHOLDERS.contains(&s)
+}
+
+/// `22,80,443,8000-8100`: comma-separated ports and ascending ranges. Returns an explanation on failure.
+pub fn validate_port_list(s: &str, max_items: usize) -> Result<(), String> {
+    if s.is_empty() || s.len() > 200 {
+        return Err("the port list is empty or too long".into());
+    }
+    let items: Vec<&str> = s.split(',').collect();
+    if items.len() > max_items {
+        return Err(format!("at most {max_items} ports or ranges"));
+    }
+    let port = |p: &str| -> Result<u32, String> {
+        if p.is_empty() || p.len() > 5 || !p.chars().all(|c| c.is_ascii_digit()) {
+            return Err(format!("'{p}' is not a port number"));
+        }
+        let n: u32 = p.parse().map_err(|_| format!("'{p}' is not a port number"))?;
+        if (1..=65535).contains(&n) {
+            Ok(n)
+        } else {
+            Err(format!("port {n} is outside 1-65535"))
+        }
+    };
+    for it in items {
+        match it.split_once('-') {
+            Some((a, b)) => {
+                let (a, b) = (port(a)?, port(b)?);
+                if a >= b {
+                    return Err(format!("the range '{it}' must go from a lower to a higher port"));
+                }
+            }
+            None => {
+                port(it)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Syntax-only check of a user-supplied folder or file path. Existence is checked at run time.
+pub fn validate_path_syntax(s: &str, kind: PathKind, extensions: &[String]) -> Result<(), String> {
+    let e = |r: AppResult<String>| r.map(|_| ()).map_err(|e| e.to_string().replace("validation failed: ", ""));
+    match kind {
+        PathKind::Directory => e(super::container::validate_host_mount(s, None)),
+        PathKind::File => {
+            let norm = s.replace('/', "\\");
+            let (dir, file) = norm.rsplit_once('\\').ok_or_else(|| "use a full path such as D:\\labs\\file.txt".to_string())?;
+            if file.is_empty() || file.len() > 120 || file.starts_with('-') || file.contains([':', '*', '?', '"', '<', '>', '|']) || file.ends_with('.') {
+                return Err("the file name is not valid".into());
+            }
+            e(super::container::validate_host_mount(dir, None))?;
+            if !extensions.is_empty() {
+                let ext = file.rsplit_once('.').map(|(_, x)| x.to_ascii_lowercase()).unwrap_or_default();
+                if !extensions.iter().any(|x| x.eq_ignore_ascii_case(&ext)) {
+                    return Err(format!("only {} files are accepted", extensions.join(", ")));
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
 fn check_value(def: &ParameterDef, v: &ParamValue) -> AppResult<()> {
     let err = |m: &str| Err(AppError::Validation(format!("parameter '{}': {m}", def.name)));
     match (&def.kind, v) {
@@ -797,16 +1055,34 @@ fn check_value(def: &ParameterDef, v: &ParamValue) -> AppResult<()> {
                 Ok(())
             }
         }
-        (ParamKind::Host, ParamValue::Text(s)) => {
-            let ok = !s.is_empty()
-                && s.len() <= 253
-                && !s.starts_with('-')
-                && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '/' | '[' | ']' | '_'));
-            if ok {
+        (ParamKind::Host | ParamKind::Ip | ParamKind::Url, ParamValue::Text(s)) => {
+            if is_placeholder(s) {
+                return Ok(());
+            }
+            let form = def.kind.target_form().expect("target kind");
+            match super::scope::parse_target(s, form) {
+                Ok(_) => Ok(()),
+                Err(e) => err(&e.to_string().replace("validation failed: ", "")),
+            }
+        }
+        (ParamKind::Port, ParamValue::Int(n)) => {
+            if (1..=65535).contains(n) {
                 Ok(())
             } else {
-                err("must be a hostname, IP address or CIDR range")
+                err("must be a port number between 1 and 65535")
             }
+        }
+        (ParamKind::PortList { max_items }, ParamValue::Text(s)) => {
+            if is_placeholder(s) {
+                return Ok(());
+            }
+            validate_port_list(s, max_items.unwrap_or(32)).or_else(|m| err(&m))
+        }
+        (ParamKind::Path { path_kind, extensions, .. }, ParamValue::Text(s)) => {
+            if is_placeholder(s) {
+                return Ok(());
+            }
+            validate_path_syntax(s, *path_kind, extensions).or_else(|m| err(&m))
         }
         (ParamKind::Choice { options }, ParamValue::Text(s)) => {
             if options.contains(s) {
@@ -828,24 +1104,71 @@ fn quote_for_display(s: &str) -> String {
     }
 }
 
+/// Extra inputs for building a command: this run's own folder and lab placeholder values.
+#[derive(Debug, Default, Clone)]
+pub struct BuildContext {
+    pub run_dir: Option<String>,
+    pub placeholders: HashMap<String, String>,
+}
+
+/// A validated command plus the values the safety layers must still check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltCommand {
+    pub preview: CommandPreview,
+    /// Network targets (parameter, form, canonical value): subject to scope checks before running.
+    pub targets: Vec<(String, super::scope::TargetForm, String)>,
+    /// Folders/files (parameter, kind, must_exist, normalised path): checked against the file system before running.
+    pub paths: Vec<(String, PathKind, bool, String)>,
+}
+
 pub fn build_command(run: &RunSpec, values: &HashMap<String, ParamValue>) -> AppResult<CommandPreview> {
+    build_command_with(run, values, &BuildContext::default()).map(|b| b.preview)
+}
+
+pub fn build_command_with(run: &RunSpec, values: &HashMap<String, ParamValue>, ctx: &BuildContext) -> AppResult<BuiltCommand> {
     for k in values.keys() {
         if !run.parameters.iter().any(|p| &p.name == k) {
             return Err(AppError::Validation(format!("unknown parameter '{k}'")));
         }
     }
-    let mut effective: HashMap<&str, &ParamValue> = HashMap::new();
+    // Effective values: provided > default, with lab placeholders replaced by their real values.
+    let mut effective: HashMap<&str, ParamValue> = HashMap::new();
+    let mut rendered: HashMap<&str, String> = HashMap::new();
+    let mut targets = Vec::new();
+    let mut paths = Vec::new();
     for p in &run.parameters {
-        match values.get(&p.name).or(p.default.as_ref()) {
-            Some(v) => {
-                check_value(p, v)?;
-                effective.insert(p.name.as_str(), v);
-            }
-            None if p.required => {
+        let Some(v) = values.get(&p.name).or(p.default.as_ref()) else {
+            if p.required {
                 return Err(AppError::Validation(format!("parameter '{}' is required", p.name)));
             }
-            None => {}
-        }
+            continue;
+        };
+        let v = match v {
+            ParamValue::Text(s) if is_placeholder(s) => ParamValue::Text(
+                ctx.placeholders.get(s.as_str()).cloned().ok_or_else(|| AppError::Validation(format!("parameter '{}': the lab value {s} is not available", p.name)))?,
+            ),
+            other => other.clone(),
+        };
+        check_value(p, &v)?;
+        let text = match (&p.kind, &v) {
+            (kind, ParamValue::Text(s)) if kind.target_form().is_some() => {
+                let t = super::scope::parse_target(s, kind.target_form().expect("form"))?;
+                targets.push((p.name.clone(), kind.target_form().expect("form"), t.canonical.clone()));
+                t.canonical
+            }
+            (ParamKind::Path { path_kind, must_exist, .. }, ParamValue::Text(s)) => {
+                let norm = s.trim().replace('/', "\\");
+                let norm = match path_kind {
+                    PathKind::Directory => super::container::validate_host_mount(&norm, None)?,
+                    PathKind::File => norm,
+                };
+                paths.push((p.name.clone(), *path_kind, *must_exist, norm.clone()));
+                norm
+            }
+            _ => render(&v),
+        };
+        rendered.insert(p.name.as_str(), text);
+        effective.insert(p.name.as_str(), v);
     }
 
     let mut args: Vec<String> = Vec::new();
@@ -853,20 +1176,27 @@ pub fn build_command(run: &RunSpec, values: &HashMap<String, ParamValue>) -> App
         match t {
             ArgTemplate::Literal { value } => args.push(value.clone()),
             ArgTemplate::Value { param } => {
-                if let Some(v) = effective.get(param.as_str()) {
-                    args.push(render(v));
+                if let Some(v) = rendered.get(param.as_str()) {
+                    args.push(v.clone());
                 }
             }
             ArgTemplate::Flag { param, flag } => {
-                if let Some(ParamValue::Bool(true)) = effective.get(param.as_str()).copied() {
+                if let Some(ParamValue::Bool(true)) = effective.get(param.as_str()) {
                     args.push(flag.clone());
                 }
             }
             ArgTemplate::OptionValue { param, flag } => {
-                if let Some(v) = effective.get(param.as_str()) {
+                if let Some(v) = rendered.get(param.as_str()) {
                     args.push(flag.clone());
-                    args.push(render(v));
+                    args.push(v.clone());
                 }
+            }
+            ArgTemplate::RunFile { name, flag } => {
+                let dir = ctx.run_dir.as_deref().ok_or_else(|| AppError::Validation("this profile writes a file into the run folder, which is not available here".into()))?;
+                if let Some(f) = flag {
+                    args.push(f.clone());
+                }
+                args.push(format!("{}\\{}", dir.trim_end_matches('\\'), name));
             }
         }
     }
@@ -876,7 +1206,7 @@ pub fn build_command(run: &RunSpec, values: &HashMap<String, ParamValue>) -> App
         .map(quote_for_display)
         .collect::<Vec<_>>()
         .join(" ");
-    Ok(CommandPreview { runtime: run.runtime, program: run.executable.clone(), args, display })
+    Ok(BuiltCommand { preview: CommandPreview { runtime: run.runtime, program: run.executable.clone(), args, display }, targets, paths })
 }
 
 fn render(v: &ParamValue) -> String {
@@ -957,6 +1287,7 @@ id = "scan"
 label = "Scan a target"
 runtime = "windows_native"
 executable = "nmap.exe"
+network_activity = "probes_targets"
 args = [
   { kind = "flag", param = "service_scan", flag = "-sV" },
   { kind = "option", param = "ports", flag = "-p" },
@@ -1107,7 +1438,7 @@ mod tests {
 
     #[test]
     fn malicious_arguments_are_rejected_not_escaped() {
-        for evil in ["-oN evil", "host; calc", "host && dir", "a b", "$(x)", "host\n", "`calc`", "a|b", "a>out", "%PATH%", "host\"x"] {
+        for evil in ["-oN evil", "host; calc", "host && dir", "a b", "$(x)", "host\nx", "`calc`", "a|b", "a>out", "%PATH%", "host\"x"] {
             let r = build_command(&run_spec(), &vals(&[("target", ParamValue::Text(evil.into()))]));
             assert!(r.is_err(), "should reject {evil:?}");
         }
@@ -1128,4 +1459,12 @@ mod tests {
         .is_err());
     }
 }
+
+
+
+
+
+
+
+
 

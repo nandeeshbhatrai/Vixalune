@@ -6,7 +6,13 @@
   InstalledTool,
   InstallPlan,
   Job,
-  LabDefinition,
+  LabStatus,
+  LaunchDefaults,
+  OutputRow,
+  PurgeReport,
+  RunRecord,
+  Tutorial,
+  UserSettings,
   LinkKind,
   ParamValue,
   PlatformReport,
@@ -40,7 +46,29 @@ export interface Backend {
   listJobs(): Promise<Job[]>;
   getJobOutput(jobId: string): Promise<string[]>;
   recentActivity(limit?: number): Promise<ActivityEvent[]>;
-  listLabs(): Promise<LabDefinition[]>;
+  listLabs(): Promise<LabStatus[]>;
+  /** Start or stop a learning lab (the practice web application runs only on 127.0.0.1). Returns the updated list. */
+  startLab(id: string): Promise<LabStatus[]>;
+  stopLab(id: string): Promise<LabStatus[]>;
+  /** Form defaults for a profile, with lab placeholders already replaced by real values. */
+  getLaunchDefaults(toolId: string, profile: string): Promise<LaunchDefaults>;
+  getJob(jobId: string): Promise<Job>;
+  /** Output lines after sequence number `after` (0 = from the start). Poll this while a run is active. */
+  getRunOutput(jobId: string, after: number): Promise<OutputRow[]>;
+  listRuns(limit?: number): Promise<RunRecord[]>;
+  getRun(jobId: string): Promise<RunRecord>;
+  /** The backend opens the Save dialog and writes the stored output; resolves with the saved path, or null if cancelled. */
+  saveRunOutput(jobId: string): Promise<string | null>;
+  /** Show the run's own folder (report files) in Explorer. */
+  openRunFolder(jobId: string): Promise<void>;
+  getSettings(): Promise<UserSettings>;
+  updateSettings(settings: UserSettings): Promise<UserSettings>;
+  /** Delete all finished run history and stored output now. */
+  purgeHistoryNow(): Promise<PurgeReport>;
+  listTutorials(): Promise<Tutorial[]>;
+  getTutorial(toolId: string): Promise<Tutorial>;
+  /** Open one of a tutorial's official links (the backend reads the address from the validated tutorial). */
+  openTutorialLink(toolId: string, index: number): Promise<void>;
   /** What installing would do on this machine: prerequisites, privileges, size, blockers. */
   getInstallPlan(toolId: string): Promise<InstallPlan>;
 

@@ -105,3 +105,22 @@ wsl --unregister Ubuntu-24.04                      # removes the distribution an
 docker rm -f $(docker ps -aq --filter label=vixalune.managed=true)
 docker image rm docker.io/semgrep/semgrep@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3
 ```
+
+## G. Running tools natively (Nmap, Trivy, OWASP ZAP) and the learning labs
+
+Phase 5 was tested with simulated tool processes (and a real practice server). These steps are what still has to be checked on real software. Do them only against the practice lab or machines you own.
+
+Prerequisites: install Nmap, Trivy and OWASP ZAP from the Tool Library (winget). Open **Learning Labs** and start the **Practice web application**; also use **Create or refresh the files** on the sample project.
+
+1. **Practice server.** Browse to `http://127.0.0.1:18080/`: the shop page loads. `/search?q=<b>x</b>` reflects the markup. `/files/`, `/admin/`, `/robots.txt` respond. From *another* computer on your network, `http://<your-ip>:18080/` must **not** answer. Stop the lab: the port closes (`netstat -ano | findstr 18080` shows nothing).
+2. **Nmap.** Run a Tool → Nmap → *Identify services on chosen ports* with the defaults. Check the preview (command, scope "This computer", 900 s limit, no administrator rights), run, and confirm the lab's port appears as open and the run is *Completed with findings*. Stop the lab and run again: no open port, *Completed, nothing reported*. Open Task Manager during the run: `nmap.exe` is **not** elevated.
+3. **Scope.** Enter a public host you do not own. The preview must show *Public internet* and ask for a tick and the typed host name; Run must stay disabled until both are given. Do **not** actually run it unless you own the target. Try `0.0.0.0`, `127.1`, `2130706433`, `a;b` and `-iL x`: each must be refused with a clear message. Add `192.168.56.0/24` (or your lab network) to Settings → Lab list and check that a host in it no longer asks for confirmation.
+4. **Redirect.** Start the practice app, then run ZAP or review with the URL `http://127.0.0.1:18080/redirect?to=http%3A%2F%2F93.184.216.34%2F`. The review must refuse with a redirect-outside-scope message (the redirect target is never contacted).
+5. **Trivy.** Run *Scan a project folder* on the sample folder (first run downloads the vulnerability database). Expect findings for the old Flask/Requests/Jinja2/lodash versions; exit code 1 must be shown as *Completed with findings*, not an error. Whether Trivy reports the documented example key in `config.env` may vary; record what it does. Then try a folder such as `C:\Windows` or your profile folder: refused.
+6. **ZAP (unverified).** Run the quick scan against the practice app. **The install folder and the `-cmd -quickurl -quickout -quickprogress` flags have not been run by the developers.** Record the real executable path, the real command that works, and where the report lands; use *Open run folder* to find `zap-report.html`. If ZAP cannot be found, that is a manifest finding.
+7. **Cancel and timeout.** Start a long ZAP scan and Cancel: the job ends *Cancelled* and `zap.exe`/`java.exe` are gone from Task Manager (process tree killed). Temporarily lower `timeout_secs` in a copy of a manifest to see *Timed out*.
+8. **Semgrep container.** (Needs Docker running.) *Scan the practice code project*: approve the suggested sample folder; expect three findings and *Completed with findings* (exit 1).
+9. **Save and retention.** Use *Save output…*: the Windows Save dialog opens; saving as `.txt` works. Try typing a `.exe` name or a folder under `C:\Windows`: refused. In Settings set output retention to 0, restart Vixalune: stored output is gone, the history rows remain; *Delete history and output now* empties the list; your saved file is untouched.
+10. **Privacy.** Search the database (`%APPDATA%\app.vixalune.desktop\vixalune.db`) and logs for passwords or tokens you typed in a command: none should appear (masked).
+
+Cleanup: stop the lab, uninstall the tools you do not need, delete `%USERPROFILE%\Vixalune\labs` if you want the sample files gone, and remove `%APPDATA%\app.vixalune.desktop\runs`.

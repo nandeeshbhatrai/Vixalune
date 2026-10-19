@@ -30,6 +30,23 @@ impl LinkOpener for SystemLinkOpener {
             Err(AppError::NotImplemented("open link on this OS"))
         }
     }
+    fn open_folder(&self, path: &std::path::Path) -> AppResult<()> {
+        if !path.is_dir() {
+            return Err(AppError::NotFound("that folder".into()));
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            // Fixed program; the folder is one argument and is not parsed by a shell.
+            std::process::Command::new("explorer.exe").arg(path).creation_flags(CREATE_NO_WINDOW).spawn()?;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            Err(AppError::NotImplemented("open folder on this OS"))
+        }
+    }
 }
 
 #[cfg(test)]

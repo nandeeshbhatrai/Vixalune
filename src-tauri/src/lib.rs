@@ -10,6 +10,8 @@ pub mod logging;
 pub mod ports;
 #[cfg(test)]
 mod security_tests;
+#[cfg(test)]
+mod release_tests;
 
 use adapters::{
     activity_sqlite::SqliteActivityLogger,
@@ -55,10 +57,17 @@ fn manifests_dir(app: &tauri::App) -> PathBuf {
 }
 
 fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>> {
-    let data_dir = app.path().app_data_dir()?;
+    // The data folder is separate from the program files. VIXALUNE_DATA_DIR chooses another one (portable or test installs).
+    let override_dir = domain::storage::data_dir_override(std::env::var_os(domain::storage::DATA_DIR_ENV))?;
+    let data_dir_overridden = override_dir.is_some();
+    let data_dir = match override_dir {
+        Some(d) => d,
+        None => app.path().app_data_dir()?,
+    };
     std::fs::create_dir_all(&data_dir)?;
     let mut startup_notices: Vec<String> = Vec::new();
-    let (config, moved_config, config_problem) = AppConfig::load_or_recover(&data_dir.join("config.toml"), &data_dir);
+    let config_path = data_dir.join("config.toml");
+    let (config, moved_config, config_problem) = AppConfig::load_or_recover(&config_path, &data_dir);
     if let Some(why) = config_problem {
         tracing::error!("config.toml was invalid and defaults are used: {why}");
         startup_notices.push(match moved_config {
@@ -75,12 +84,23 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
     }
     let registry = Arc::new(registry);
     // A damaged database is moved aside and replaced, never allowed to stop the application from starting.
-    match adapters::sqlite_store::prepare_database(&config.storage.database_path) {
-        Ok(Some(moved)) => {
-            tracing::error!("the database was damaged and was moved to {}", moved.display());
-            startup_notices.push(format!("The local database was damaged. It was moved to {} and a new one was created; run history and the record of installed tools were reset (installed tools are detected again automatically).", moved.display()));
+    use adapters::sqlite_store::DatabaseCheck;
+    match adapters::sqlite_store::check_database(&config.storage.database_path) {
+        Ok(DatabaseCheck::Damaged { moved_to }) => {
+            tracing::error!("the database was damaged and was moved to {}", moved_to.display());
+            startup_notices.push(format!("The local database was damaged. It was moved to {} and a new one was created; run history and the record of installed tools were reset (installed tools are detected again automatically).", moved_to.display()));
         }
-        Ok(None) => {}
+        Ok(DatabaseCheck::Newer { moved_to, found }) => {
+            tracing::error!("the database has layout version {found}, newer than this build supports; moved to {}", moved_to.display());
+            startup_notices.push(format!("The local database was written by a newer version of Vixalune (layout {found}). It was kept untouched as {} and this version started with an empty one. Install the newer version again and rename the file back to restore your history.", moved_to.display()));
+        }
+        Ok(DatabaseCheck::Healthy { upgraded_from: Some(old), backup }) => {
+            tracing::info!("database layout upgraded from {old}");
+            if let Some(b) = backup {
+                startup_notices.push(format!("Your data was upgraded to this version. A backup of the previous database was saved as {}.", b.display()));
+            }
+        }
+        Ok(_) => {}
         Err(e) => return Err(format!("the database could not be checked or replaced: {e}").into()),
     }
     let activity = Arc::new(SqliteActivityLogger::open(&config.storage.database_path)?);
@@ -128,6 +148,10 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         probe: Arc::new(HttpRedirectProbe),
         runs_dir: data_dir.join("runs"),
     });
+    let closed = support.close_unfinished_runs();
+    if closed > 0 {
+        tracing::warn!("{closed} run(s) were cut short by the last shutdown and are shown as failed");
+    }
     match support.purge_expired() {
         Ok(r) if r.runs_deleted + r.output_lines_deleted + r.jobs_deleted > 0 => tracing::info!("retention purge removed {} run(s), {} output line(s)", r.runs_deleted, r.output_lines_deleted),
         Ok(_) => {}
@@ -198,8 +222,12 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         data_dir,
         rejected_manifests: rejected,
         startup_notices,
+        config_path,
+        config: std::sync::Mutex::new(config.clone()),
+        data_dir_overridden,
+        restart_required: std::sync::atomic::AtomicBool::new(false),
     };
-    commands::log(&state, ActivityKind::AppStarted, "Vixalune started");
+    commands::log(&state, ActivityKind::AppStarted, &format!("Vixalune {} started", env!("CARGO_PKG_VERSION")));
     Ok(state)
 }
 
@@ -252,6 +280,9 @@ pub fn run() {
             commands::get_tutorial,
             commands::open_tutorial_link,
             commands::open_link,
+            commands::get_storage_info,
+            commands::update_storage,
+            commands::open_release_page,
             commands::get_install_plan,
             commands::approve_job,
             commands::refresh_tool_states,

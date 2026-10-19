@@ -82,9 +82,13 @@ test("tutorial shows the authorization boundary first", async ({ page }) => {
   await expect(page.getByText("Your first run")).toBeVisible();
 });
 
-test("first launch opens the setup wizard, explains and asks before changing anything", async ({ page }) => {
+test("first launch opens the welcome tour, then the setup wizard explains and asks before changing anything", async ({ page }) => {
   await page.addInitScript(() => localStorage.removeItem("vixalune.setupSeen"));
   await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1, name: "Welcome to Vixalune" })).toBeVisible();
+  await page.getByRole("button", { name: /2\. Your computer/ }).click();
+  await expect(page.getByRole("list", { name: "Readiness" })).toBeVisible();
+  await page.getByRole("link", { name: "Setup guide" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Setup" })).toBeVisible();
   await expect(page.getByRole("list", { name: "Detected facts" })).toBeVisible();
   await page.getByRole("button", { name: /4\. Set up/ }).click();

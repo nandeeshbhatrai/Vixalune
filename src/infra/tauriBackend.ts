@@ -13,6 +13,7 @@ import type {
   OutputRow,
   PurgeReport,
   RunRecord,
+  StorageInfo,
   Tutorial,
   UserSettings,
   PlatformReport,
@@ -63,6 +64,9 @@ export const tauriBackend: Backend = {
   openSetupLink: (id) => invoke<void>("open_setup_link", { id }),
   approveJob: (jobId) => invoke<void>("approve_job", { id: jobId }),
   cancelJob: (jobId) => invoke<void>("cancel_job", { id: jobId }),
+  getStorageInfo: () => invoke<StorageInfo>("get_storage_info"),
+  updateStorage: (update) => invoke<StorageInfo>("update_storage", { update }),
+  openReleasePage: () => invoke<void>("open_release_page"),
   openLink: (toolId, kind) => invoke<void>("open_link", { toolId, kind }),
 };
 

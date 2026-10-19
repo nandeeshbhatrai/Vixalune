@@ -52,6 +52,9 @@ export const unavailableBackend: Backend = {
   openSetupLink: fail,
   approveJob: fail,
   cancelJob: fail,
+  getStorageInfo: fail,
+  updateStorage: fail,
+  openReleasePage: fail,
   openLink: fail,
 };
 

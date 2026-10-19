@@ -11,6 +11,7 @@ import { RunPage } from "@/pages/RunPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SetupWizard } from "@/pages/SetupWizard";
 import { ToolDetail } from "@/pages/ToolDetail";
+import { Welcome } from "@/pages/Welcome";
 import { BackendProvider, selectBackend } from "@/infra/backendContext";
 
 export function AppRoutes({ firstRunRedirect = false }: { firstRunRedirect?: boolean }) {
@@ -27,6 +28,7 @@ export function AppRoutes({ firstRunRedirect = false }: { firstRunRedirect?: boo
         <Route path="learn" element={<LearnIndex />} />
         <Route path="learn/:toolId" element={<TutorialPage />} />
         <Route path="labs" element={<Labs />} />
+        <Route path="welcome" element={<Welcome />} />
         <Route path="setup" element={<SetupWizard />} />
         <Route path="activity" element={<ActivityPage />} />
         <Route path="settings" element={<SettingsPage />} />

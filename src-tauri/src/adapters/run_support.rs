@@ -207,6 +207,16 @@ impl RunSupport {
         }
     }
 
+    /// At start-up nothing is running, so any run record without an outcome belongs to a run that was cut short (a crash, a kill, a
+    /// power loss). Mark it failed so history never claims a run is still going. Returns how many were closed.
+    pub fn close_unfinished_runs(&self) -> usize {
+        let open: Vec<OperationId> = self.history.list_runs(10_000).map(|v| v.into_iter().filter(|r| r.outcome.is_none()).map(|r| r.id).collect()).unwrap_or_default();
+        for id in &open {
+            self.record_finish(*id, None, RunOutcome::Failed);
+        }
+        open.len()
+    }
+
     /// Apply the retention settings: delete expired history and output.
     pub fn purge_expired(&self) -> AppResult<crate::domain::runs::PurgeReport> {
         let s = self.settings.get();

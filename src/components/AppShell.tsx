@@ -2,6 +2,7 @@
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { StartupNotices } from "@/components/StartupNotices";
 import { setupSeen } from "@/pages/SetupWizard";
+import { useAsync } from "@/hooks/useAsync";
 import { useBackend } from "@/infra/backendContext";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { cn } from "@/lib/utils";
@@ -19,11 +20,17 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
+function AppVersion() {
+  const backend = useBackend();
+  const [info] = useAsync(() => backend.getAppInfo(), [backend]);
+  return info.status === "ready" ? <p className="px-3 pb-2 text-xs text-muted-foreground">Version {info.data.version}</p> : null;
+}
+
 export function AppShell({ firstRunRedirect = false }: { firstRunRedirect?: boolean }) {
   const backend = useBackend();
   const location = useLocation();
-  // First launch: open the setup wizard once. It never changes anything by itself.
-  if (firstRunRedirect && location.pathname === "/" && !setupSeen()) return <Navigate to="/setup" replace />;
+  // First launch: open the welcome tour once. It never changes anything by itself.
+  if (firstRunRedirect && location.pathname === "/" && !setupSeen()) return <Navigate to="/welcome" replace />;
   return (
     <WorkspaceProvider>
       <a
@@ -53,6 +60,7 @@ export function AppShell({ firstRunRedirect = false }: { firstRunRedirect?: bool
             </NavLink>
           ))}
           <p className="mt-auto px-3 pb-1 text-xs text-muted-foreground">For authorized testing and learning only.</p>
+          <AppVersion />
         </nav>
         <div className="flex min-w-0 flex-1 flex-col">
           {backend.isDemo ? (

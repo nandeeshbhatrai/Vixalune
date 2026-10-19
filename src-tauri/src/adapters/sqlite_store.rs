@@ -17,32 +17,99 @@ const MAX_LINE: usize = 2000;
 const TRIM_ABOVE: i64 = 3000;
 const KEEP_LINES: i64 = 2000;
 
-/// Check the database file before it is opened for real. A file that is not a database, or that fails SQLite's own integrity
-/// check, is moved aside (never deleted) so the application starts with a fresh, empty one and the old file can still be
-/// inspected. Returns where the damaged file went.
-pub fn prepare_database(path: &Path) -> AppResult<Option<std::path::PathBuf>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let healthy = Connection::open(path)
-        .and_then(|c| c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0)))
-        .map(|r| r == "ok")
-        .unwrap_or(false);
-    if healthy {
-        return Ok(None);
-    }
+/// Version of the database layout this build reads and writes (`PRAGMA user_version`). Raise it when a table changes, and add the
+/// migration to `check_database`.
+pub const SCHEMA_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DatabaseCheck {
+    /// No database yet; a new one will be created.
+    Fresh,
+    /// Usable as it is. `upgraded_from` is set when the layout version was raised; `backup` is the copy made first.
+    Healthy { upgraded_from: Option<i64>, backup: Option<std::path::PathBuf> },
+    /// Failed SQLite's integrity check (or is not a database). Moved aside, never deleted.
+    Damaged { moved_to: std::path::PathBuf },
+    /// Written by a newer Vixalune than this one (for example after a downgrade). Moved aside untouched so the newer version
+    /// can use it again; this version starts with an empty one.
+    Newer { moved_to: std::path::PathBuf, found: i64 },
+}
+
+fn move_aside(path: &Path, label: &str) -> AppResult<std::path::PathBuf> {
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S");
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "vixalune.db".into());
-    let target = path.with_file_name(format!("{name}.corrupt-{stamp}"));
+    let target = path.with_file_name(format!("{name}.{label}-{stamp}"));
     std::fs::rename(path, &target)?;
-    // Stale journal files belong to the damaged file; leaving them would corrupt the new one.
+    // Journal files belong to the file that moved; leaving them behind would corrupt the new one.
     for suffix in ["-wal", "-shm", "-journal"] {
         let side = path.with_file_name(format!("{name}{suffix}"));
         if side.exists() {
-            let _ = std::fs::rename(&side, path.with_file_name(format!("{name}.corrupt-{stamp}{suffix}")));
+            let _ = std::fs::rename(&side, path.with_file_name(format!("{name}.{label}-{stamp}{suffix}")));
         }
     }
-    Ok(Some(target))
+    Ok(target)
+}
+
+/// Check the database file before it is opened for real:
+/// - damaged files (SQLite integrity check) are moved aside, never deleted;
+/// - files from a newer version are moved aside untouched;
+/// - files from an older version get a backup copy (`<name>.bak-v<old>`, made once) and their layout version raised.
+pub fn check_database(path: &Path) -> AppResult<DatabaseCheck> {
+    if !path.exists() {
+        return Ok(DatabaseCheck::Fresh);
+    }
+    let probe = Connection::open(path).and_then(|c| {
+        let ok = c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))? == "ok";
+        let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        let tables: i64 = c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table'", [], |r| r.get(0))?;
+        Ok((ok, version, tables, c))
+    });
+    let Ok((ok, version, tables, conn)) = probe else {
+        return Ok(DatabaseCheck::Damaged { moved_to: move_aside(path, "corrupt")? });
+    };
+    if !ok {
+        drop(conn);
+        return Ok(DatabaseCheck::Damaged { moved_to: move_aside(path, "corrupt")? });
+    }
+    if version > SCHEMA_VERSION {
+        drop(conn);
+        return Ok(DatabaseCheck::Newer { moved_to: move_aside(path, "newer")?, found: version });
+    }
+    if version < SCHEMA_VERSION {
+        let mut backup = None;
+        if tables > 0 {
+            // Fold the journal into the main file so the copy is complete, then keep one copy per old version.
+            let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "vixalune.db".into());
+            let target = path.with_file_name(format!("{name}.bak-v{version}"));
+            if !target.exists() {
+                drop(conn);
+                std::fs::copy(path, &target)?;
+                backup = Some(target);
+                let conn = Connection::open(path)?;
+                conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+            } else {
+                conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+            }
+        } else {
+            conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+        }
+        return Ok(DatabaseCheck::Healthy { upgraded_from: Some(version), backup });
+    }
+    Ok(DatabaseCheck::Healthy { upgraded_from: None, backup: None })
+}
+
+/// Compatibility wrapper: where a damaged or too-new file was moved, if it was.
+pub fn prepare_database(path: &Path) -> AppResult<Option<std::path::PathBuf>> {
+    Ok(match check_database(path)? {
+        DatabaseCheck::Damaged { moved_to } | DatabaseCheck::Newer { moved_to, .. } => Some(moved_to),
+        _ => None,
+    })
+}
+
+/// Sets the layout version on a database created by this build.
+fn stamp_schema_version(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+    Ok(())
 }
 
 pub struct SqliteJobStore {
@@ -60,6 +127,7 @@ impl SqliteJobStore {
         }
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        stamp_schema_version(&conn)?;
         Self::init(conn)
     }
 

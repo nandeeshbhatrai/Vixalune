@@ -7,6 +7,7 @@ use crate::domain::lab::{LabState, LabStatus};
 use crate::domain::learning::Tutorial;
 use crate::domain::runs::{LaunchDefaults, OutputRow, PurgeReport, RunRecord};
 use crate::domain::settings::UserSettings;
+use crate::domain::storage::{validate_storage_dir, StorageInfo, StorageKind, StorageUpdate};
 use crate::domain::LabId;
 use crate::adapters::launch_router::LaunchRouter;
 use crate::adapters::result_saver::suggested_file_name;
@@ -51,6 +52,10 @@ pub struct AppState {
     pub rejected_manifests: Vec<String>,
     /// Things that happened at start-up the user should know about (for example a damaged database that was replaced).
     pub startup_notices: Vec<String>,
+    pub config_path: PathBuf,
+    pub config: std::sync::Mutex<crate::config::AppConfig>,
+    pub data_dir_overridden: bool,
+    pub restart_required: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -360,4 +365,56 @@ pub fn open_tutorial_link(state: State<'_, AppState>, tool_id: String, index: us
     let t = state.learning.get(&ToolId::new(tool_id)?)?;
     let link = t.links.get(index).ok_or_else(|| AppError::NotFound("that link".into()))?;
     state.links.open(&link.url)
+}
+
+// ------------------------------------------------------------------ phase 7: storage and release information
+
+fn storage_info(state: &AppState) -> StorageInfo {
+    let cfg = state.config.lock().unwrap();
+    StorageInfo {
+        data_dir: state.data_dir.display().to_string(),
+        config_path: state.config_path.display().to_string(),
+        database_path: cfg.storage.database_path.display().to_string(),
+        runs_dir: state.support.runs_dir.display().to_string(),
+        tools_dir: cfg.storage.tools_dir.display().to_string(),
+        labs_dir: cfg.storage.labs_dir.display().to_string(),
+        data_dir_overridden: state.data_dir_overridden,
+        restart_required: state.restart_required.load(std::sync::atomic::Ordering::SeqCst),
+    }
+}
+
+#[tauri::command]
+pub fn get_storage_info(state: State<'_, AppState>) -> StorageInfo {
+    storage_info(&state)
+}
+
+/// Change the tools and labs folders. They are validated, created and proven writable now, saved to config.toml, and used from the next start.
+#[tauri::command]
+pub fn update_storage(state: State<'_, AppState>, update: StorageUpdate) -> AppResult<StorageInfo> {
+    let tools = validate_storage_dir(&update.tools_dir, StorageKind::Tools)?;
+    let labs = validate_storage_dir(&update.labs_dir, StorageKind::Labs)?;
+    for dir in [&tools, &labs] {
+        std::fs::create_dir_all(dir).map_err(|e| AppError::Validation(format!("the folder '{}' cannot be created: {e}", dir.display())))?;
+        // Prove it is writable now rather than failing later in the middle of a run.
+        let probe = dir.join(format!(".vixalune-write-test-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::write(&probe, b"x").map_err(|e| AppError::Validation(format!("the folder '{}' is not writable: {e}", dir.display())))?;
+        let _ = std::fs::remove_file(&probe);
+    }
+    {
+        let mut cfg = state.config.lock().unwrap();
+        let mut next = cfg.clone();
+        next.storage.tools_dir = tools;
+        next.storage.labs_dir = labs;
+        next.save(&state.config_path)?;
+        *cfg = next;
+    }
+    state.restart_required.store(true, std::sync::atomic::Ordering::SeqCst);
+    log(&state, ActivityKind::SettingsChanged, "storage locations changed (applied at the next start)");
+    Ok(storage_info(&state))
+}
+
+/// Open the project's release page. The address is fixed in the backend; Vixalune never downloads or runs updates itself.
+#[tauri::command]
+pub fn open_release_page(state: State<'_, AppState>) -> AppResult<()> {
+    state.links.open(crate::domain::storage::RELEASE_PAGE)
 }

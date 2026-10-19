@@ -11,6 +11,8 @@
   OutputRow,
   PurgeReport,
   RunRecord,
+  StorageInfo,
+  StorageUpdate,
   Tutorial,
   UserSettings,
   LinkKind,
@@ -90,6 +92,12 @@ export interface Backend {
   /** Grant the consent a job is waiting for. */
   approveJob(jobId: string): Promise<void>;
   cancelJob(jobId: string): Promise<void>;
+  /** Where data and tools are stored, and which locations can be changed. */
+  getStorageInfo(): Promise<StorageInfo>;
+  /** Change the tools and labs folders. They take effect after a restart; the backend validates and creates them. */
+  updateStorage(update: StorageUpdate): Promise<StorageInfo>;
+  /** Open the project's release page in the default browser (a fixed address owned by the backend). Vixalune never downloads or runs updates itself. */
+  openReleasePage(): Promise<void>;
   /** Opens a catalog link in the default browser. The backend resolves the URL. */
   openLink(toolId: string, kind: LinkKind): Promise<void>;
 }

@@ -11,3 +11,7 @@ test-results/
 *.db
 *.db-journal
 .DS_Store
+
+/release/
+*.corrupt-*
+*.bak-v*

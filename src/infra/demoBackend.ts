@@ -9,6 +9,7 @@ import type {
   Job,
   JobPhase,
   RunSpec,
+  StorageInfo,
   PlatformReport,
   SetupAction,
   ToolManifest,
@@ -409,6 +410,7 @@ export function createDemoBackend(): Backend {
     };
   };
 
+  const storage: StorageInfo = { data_dir: "C:\\Demo\\AppData", config_path: "C:\\Demo\\AppData\\config.toml", database_path: "C:\\Demo\\AppData\\vixalune.db", runs_dir: "C:\\Demo\\AppData\\runs", tools_dir: "C:\\Demo\\AppData\\tools", labs_dir: "C:\\Demo\\Vixalune\\labs", data_dir_overridden: false, restart_required: false };
   const runs = createDemoRuns({ tools: DEMO_TOOLS, jobs, output, nextId: () => `demo-job-${++counter}` });
 
   return {
@@ -510,6 +512,13 @@ export function createDemoBackend(): Backend {
         states.set(j.tool_id, "not_installed");
       }
     },
+    getStorageInfo: async () => structuredClone(storage),
+    updateStorage: async (u) => {
+      if (![u.tools_dir, u.labs_dir].every((p) => /^[A-Za-z]:\\[^<>"|?*]{2,}$/.test(p))) throw { code: "validation", message: "validation failed: use a full folder path such as D:\\Vixalune\\labs", recovery: "Correct the highlighted value and try again." };
+      Object.assign(storage, { tools_dir: u.tools_dir, labs_dir: u.labs_dir, restart_required: true });
+      return structuredClone(storage);
+    },
+    openReleasePage: async () => undefined,
     openLink: async () => {
       // Demo URLs are placeholders; nothing is opened.
     },

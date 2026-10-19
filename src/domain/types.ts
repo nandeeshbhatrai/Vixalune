@@ -538,3 +538,25 @@ export interface Tutorial {
   links: { label: string; url: string }[];
 }
 
+
+// ---------------------------------------------------------------- storage and release information (Phase 7)
+
+export interface StorageInfo {
+  /** Where settings, the database, run folders and logs live. Fixed (see the installation guide for the override). */
+  data_dir: string;
+  config_path: string;
+  database_path: string;
+  runs_dir: string;
+  /** Editable locations. */
+  tools_dir: string;
+  labs_dir: string;
+  /** True when the data folder was chosen with the VIXALUNE_DATA_DIR environment variable. */
+  data_dir_overridden: boolean;
+  /** True after a change that only takes effect when Vixalune is restarted. */
+  restart_required: boolean;
+}
+
+export interface StorageUpdate {
+  tools_dir: string;
+  labs_dir: string;
+}

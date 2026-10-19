@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Vixalune",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "app.vixalune.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -25,11 +25,39 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "publisher": "The Vixalune contributors",
+    "copyright": "Copyright (c) 2026 The Vixalune contributors. MIT License.",
+    "category": "DeveloperTool",
+    "shortDescription": "Discover, install, run and learn open-source security tools on Windows.",
+    "longDescription": "Vixalune is a desktop workbench for beginner security learners. It installs a curated set of open-source security tools, runs them with guarded parameters against local practice labs, and explains how to read the results. For authorized testing and learning only.",
+    "licenseFile": "../LICENSE",
     "resources": {
-      "../manifests/": "manifests/"
+      "../manifests/": "manifests/",
+      "../THIRD_PARTY_LICENSES.md": "THIRD_PARTY_LICENSES.md",
+      "../LICENSE": "LICENSE.txt"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "startMenuFolder": "Vixalune",
+        "compression": "lzma"
+      }
     }
   }
 }

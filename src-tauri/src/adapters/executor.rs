@@ -134,7 +134,9 @@ async fn pump<R: AsyncRead + Unpin>(mut reader: R, stream: OutputStream, sink: &
     let mut buf = [0u8; 4096];
     let mut pending: Vec<u8> = Vec::new();
     let emit = |bytes: &[u8]| {
-        let text = String::from_utf8_lossy(bytes);
+        // Tabs separate columns and log fields (Trivy writes `time<TAB>INFO<TAB>message`); keep them as spaces instead of
+        // gluing the fields together, then drop the other control characters.
+        let text = String::from_utf8_lossy(bytes).replace('\t', "    ");
         let cleaned: String = text.chars().filter(|c| !c.is_control()).collect();
         let t = cleaned.trim();
         if t.is_empty() || t.chars().all(|c| matches!(c, '-' | '\\' | '|' | '/')) {

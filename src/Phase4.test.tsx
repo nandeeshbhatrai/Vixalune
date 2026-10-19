@@ -25,7 +25,7 @@ describe("setup wizard", () => {
     const runSetupAction = vi.fn(async () => "x");
     const requestRestart = vi.fn(async () => undefined);
     renderApp("/", backendWith({ runSetupAction, requestRestart }), { firstRunRedirect: true });
-    expect(await screen.findByRole("heading", { level: 1, name: "Setup" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Welcome to Vixalune" })).toBeInTheDocument();
     expect(runSetupAction).not.toHaveBeenCalled();
     expect(requestRestart).not.toHaveBeenCalled();
   });

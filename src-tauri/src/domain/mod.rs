@@ -17,6 +17,7 @@ pub mod process;
 pub mod runs;
 pub mod scope;
 pub mod settings;
+pub mod storage;
 
 pub use errors::{AppError, AppResult};
 pub use ids::{LabId, OperationId, ProcessId, RunId, ToolId};

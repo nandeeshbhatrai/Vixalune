@@ -1,5 +1,6 @@
 import { AsyncView } from "@/components/AsyncView";
 import { PageHeader } from "@/components/PageHeader";
+import { AboutAndUpdates } from "@/components/AboutAndUpdates";
 import { ScopeAndRetention } from "@/components/settings/ScopeAndRetention";
 import { Card, CardTitle } from "@/components/ui/card";
 import { useAsync } from "@/hooks/useAsync";
@@ -35,6 +36,9 @@ export function SettingsPage() {
         </fieldset>
       </Card>
       <ScopeAndRetention />
+      <AsyncView state={info} retry={retry} label="Loading app info">
+        {(i) => <AboutAndUpdates info={i} />}
+      </AsyncView>
       <Card>
         <CardTitle>About this installation</CardTitle>
         <AsyncView state={info} retry={retry} label="Loading app info">

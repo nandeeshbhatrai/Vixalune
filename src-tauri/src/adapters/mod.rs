@@ -1,6 +1,7 @@
 ﻿//! Concrete implementations of the ports in `crate::ports`.
 
 pub mod activity_sqlite;
+pub mod ai;
 pub mod host_facts;
 pub mod container;
 pub mod container_runner;

@@ -8,7 +8,7 @@ you do not recognise.
 Vixalune does **not** bundle or redistribute any of the security tools it installs (Nmap, OWASP ZAP, Semgrep, Trivy, Wireshark, Nikto). They are
 downloaded by winget, apt or Docker from their publishers on the user's request, under their own licenses.
 
-## Rust crates (Windows build, 237)
+## Rust crates (Windows build, 269)
 
 | Crate | License |
 |---|---|
@@ -18,6 +18,8 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | alloc-stdlib@0.3.0 | BSD-3-Clause |
 | anyhow@1.0.104 | MIT OR Apache-2.0 |
 | async-trait@0.1.92 | MIT OR Apache-2.0 |
+| atomic-waker@1.1.2 | Apache-2.0 OR MIT |
+| base64@0.22.1 | MIT OR Apache-2.0 |
 | base64@0.23.1 | MIT OR Apache-2.0 |
 | bit-set@0.8.0 | Apache-2.0 OR MIT |
 | bit-vec@0.8.0 | Apache-2.0 OR MIT |
@@ -69,6 +71,12 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | fnv@1.0.7 | Apache-2.0 / MIT |
 | foldhash@0.2.0 | Zlib |
 | form_urlencoded@1.2.2 | MIT OR Apache-2.0 |
+| futures-channel@0.3.34 | MIT OR Apache-2.0 |
+| futures-core@0.3.34 | MIT OR Apache-2.0 |
+| futures-macro@0.3.34 | MIT OR Apache-2.0 |
+| futures-sink@0.3.34 | MIT OR Apache-2.0 |
+| futures-task@0.3.34 | MIT OR Apache-2.0 |
+| futures-util@0.3.34 | MIT OR Apache-2.0 |
 | generic-array@0.14.7 | MIT |
 | getrandom@0.3.4 | MIT OR Apache-2.0 |
 | getrandom@0.4.3 | MIT OR Apache-2.0 |
@@ -78,7 +86,13 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | hashlink@0.12.2 | MIT OR Apache-2.0 |
 | heck@0.5.0 | MIT OR Apache-2.0 |
 | html5ever@0.39.0 | MIT OR Apache-2.0 |
+| http-body-util@0.1.5 | MIT |
+| http-body@1.1.0 | MIT |
 | http@1.5.0 | MIT OR Apache-2.0 |
+| httparse@1.10.1 | MIT OR Apache-2.0 |
+| hyper-tls@0.6.0 | MIT/Apache-2.0 |
+| hyper-util@0.1.21 | MIT |
+| hyper@1.12.0 | MIT |
 | ico@0.5.0 | MIT |
 | icu_collections@2.3.0 | Unicode-3.0 |
 | icu_locale_core@2.3.0 | Unicode-3.0 |
@@ -98,6 +112,7 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | json-patch@4.2.0 | MIT/Apache-2.0 |
 | jsonptr@0.7.1 | MIT OR Apache-2.0 |
 | keyboard-types@0.8.3 | MIT OR Apache-2.0 |
+| keyring@3.6.3 | MIT OR Apache-2.0 |
 | lazy_static@1.5.1 | MIT OR Apache-2.0 |
 | libc@0.2.191 | MIT OR Apache-2.0 |
 | libsqlite3-sys@0.38.2 | MIT |
@@ -112,6 +127,7 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | miniz_oxide@0.9.1 | MIT OR Zlib OR Apache-2.0 |
 | mio@1.2.4 | MIT |
 | muda@0.20.0 | Apache-2.0 OR MIT |
+| native-tls@0.2.18 | MIT OR Apache-2.0 |
 | new_debug_unreachable@1.0.6 | MIT |
 | nu-ansi-term@0.50.3 | MIT |
 | num-conv@0.2.2 | MIT OR Apache-2.0 |
@@ -139,10 +155,14 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | regex-automata@0.4.18 | MIT OR Apache-2.0 |
 | regex-syntax@0.8.11 | MIT OR Apache-2.0 |
 | regex@1.13.1 | MIT OR Apache-2.0 |
+| reqwest@0.12.28 | MIT OR Apache-2.0 |
 | rfd@0.16.0 | MIT |
 | rusqlite@0.40.2 | MIT |
 | rustc-hash@2.1.3 | Apache-2.0 OR MIT |
+| rustls-pki-types@1.15.1 | MIT OR Apache-2.0 |
+| ryu@1.0.23 | Apache-2.0 OR BSL-1.0 |
 | same-file@1.0.6 | Unlicense/MIT |
+| schannel@0.1.30 | MIT |
 | schemars_derive@0.8.22 | MIT |
 | schemars@0.8.22 | MIT |
 | scopeguard@1.2.0 | MIT OR Apache-2.0 |
@@ -154,6 +174,7 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | serde_json@1.0.154 | MIT OR Apache-2.0 |
 | serde_repr@0.1.21 | MIT OR Apache-2.0 |
 | serde_spanned@1.1.2 | MIT OR Apache-2.0 |
+| serde_urlencoded@0.7.1 | MIT/Apache-2.0 |
 | serde_with_macros@3.24.0 | MIT OR Apache-2.0 |
 | serde_with@3.24.0 | MIT OR Apache-2.0 |
 | serde-untagged@0.1.9 | MIT OR Apache-2.0 |
@@ -165,6 +186,7 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | sharded-slab@0.1.7 | MIT |
 | simd-adler32@0.3.10 | MIT |
 | siphasher@1.0.4 | MIT OR Apache-2.0 |
+| slab@0.4.12 | MIT |
 | smallvec@1.16.3 | MIT OR Apache-2.0 |
 | socket2@0.6.5 | MIT OR Apache-2.0 |
 | softbuffer@0.4.8 | MIT OR Apache-2.0 |
@@ -173,6 +195,7 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | strsim@0.11.1 | MIT |
 | syn@2.0.119 | MIT OR Apache-2.0 |
 | syn@3.0.9 | MIT OR Apache-2.0 |
+| sync_wrapper@1.0.2 | Apache-2.0 |
 | synstructure@0.14.0 | MIT |
 | tao@0.37.1 | Apache-2.0 |
 | tauri-codegen@2.7.3 | Apache-2.0 OR MIT |
@@ -192,16 +215,23 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | time@0.3.55 | MIT OR Apache-2.0 |
 | tinystr@0.8.4 | Unicode-3.0 |
 | tokio-macros@2.7.2 | MIT |
+| tokio-native-tls@0.3.1 | MIT |
+| tokio-util@0.7.20 | MIT |
 | tokio@1.53.3 | MIT |
 | toml_datetime@1.1.2+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_parser@1.1.5+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_writer@1.1.3+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml@1.1.8+spec-1.1.0 | MIT OR Apache-2.0 |
+| tower-http@0.6.11 | MIT |
+| tower-layer@0.3.3 | MIT |
+| tower-service@0.3.3 | MIT |
+| tower@0.5.3 | MIT |
 | tracing-attributes@0.1.31 | MIT |
 | tracing-core@0.1.36 | MIT |
 | tracing-log@0.2.0 | MIT |
 | tracing-subscriber@0.3.23 | MIT |
 | tracing@0.1.44 | MIT |
+| try-lock@0.2.5 | MIT |
 | typeid@1.0.3 | MIT OR Apache-2.0 |
 | typenum@1.20.1 | MIT OR Apache-2.0 |
 | unicode-ident@1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
@@ -211,6 +241,7 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | utf8_iter@1.0.4 | Apache-2.0 OR MIT |
 | uuid@1.28.0 | Apache-2.0 OR MIT |
 | walkdir@2.5.0 | Unlicense/MIT |
+| want@0.3.2 | MIT |
 | web_atoms@0.2.6 | MIT OR Apache-2.0 |
 | web-time@1.1.0 | MIT OR Apache-2.0 |
 | webview2-com-macros@0.8.1 | MIT |
@@ -245,12 +276,13 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | yoke@0.8.3 | Unicode-3.0 |
 | zerofrom-derive@0.1.8 | Unicode-3.0 |
 | zerofrom@0.1.8 | Unicode-3.0 |
+| zeroize@1.9.1 | Apache-2.0 OR MIT |
 | zerotrie@0.2.5 | Unicode-3.0 |
 | zerovec-derive@0.11.6 | Unicode-3.0 |
 | zerovec@0.11.8 | Unicode-3.0 |
 | zmij@1.0.23 | MIT |
 
-## npm packages (front end, 40)
+## npm packages (front end, 147)
 
 | Package | License |
 |---|---|
@@ -271,26 +303,133 @@ downloaded by winget, apt or Docker from their publishers on the user's request,
 | @radix-ui/react-use-effect-event@0.0.5 | MIT |
 | @radix-ui/react-use-layout-effect@1.1.4 | MIT |
 | @tauri-apps/api@2.12.4 | Apache-2.0 OR MIT |
+| @types/debug@4.1.13 | MIT |
+| @types/estree-jsx@1.0.5 | MIT |
+| @types/estree@1.0.9 | MIT |
+| @types/hast@3.0.5 | MIT |
+| @types/mdast@4.0.4 | MIT |
+| @types/ms@2.1.0 | MIT |
 | @types/react-dom@19.3.0 | MIT |
 | @types/react@19.3.0 | MIT |
+| @types/unist@2.0.11 | MIT |
+| @types/unist@3.0.3 | MIT |
+| @ungap/structured-clone@1.4.0 | ISC |
 | aria-hidden@1.2.6 | MIT |
+| bail@2.0.2 | MIT |
+| ccount@2.0.1 | MIT |
+| character-entities-html4@2.1.0 | MIT |
+| character-entities-legacy@3.0.0 | MIT |
+| character-entities@2.0.2 | MIT |
+| character-reference-invalid@2.0.1 | MIT |
 | class-variance-authority@0.7.1 | Apache-2.0 |
 | clsx@2.1.1 | MIT |
+| comma-separated-tokens@2.0.3 | MIT |
 | cookie@1.1.1 | MIT |
 | csstype@3.2.3 | MIT |
+| debug@4.4.3 | MIT |
+| decode-named-character-reference@1.3.0 | MIT |
+| dequal@2.0.3 | MIT |
 | detect-node-es@1.1.0 | MIT |
+| devlop@1.1.0 | MIT |
+| escape-string-regexp@5.0.0 | MIT |
+| estree-util-is-identifier-name@3.0.0 | MIT |
+| extend@3.0.2 | MIT |
 | get-nonce@1.0.1 | MIT |
+| hast-util-is-element@3.0.0 | MIT |
+| hast-util-to-jsx-runtime@2.3.6 | MIT |
+| hast-util-to-text@4.0.2 | MIT |
+| hast-util-whitespace@3.0.0 | MIT |
+| highlight.js@11.11.2 | BSD-3-Clause |
+| html-url-attributes@3.0.1 | MIT |
+| inline-style-parser@0.2.7 | MIT |
+| is-alphabetical@2.0.1 | MIT |
+| is-alphanumerical@2.0.1 | MIT |
+| is-decimal@2.0.1 | MIT |
+| is-hexadecimal@2.0.1 | MIT |
+| is-plain-obj@4.1.0 | MIT |
+| longest-streak@3.1.0 | MIT |
+| lowlight@3.3.0 | MIT |
 | lucide-react@1.59.0 | ISC |
+| markdown-table@3.0.4 | MIT |
+| mdast-util-find-and-replace@3.0.3 | MIT |
+| mdast-util-from-markdown@2.1.0 | MIT |
+| mdast-util-gfm-autolink-literal@2.0.1 | MIT |
+| mdast-util-gfm-footnote@2.1.0 | MIT |
+| mdast-util-gfm-strikethrough@2.0.1 | MIT |
+| mdast-util-gfm-table@2.0.0 | MIT |
+| mdast-util-gfm-task-list-item@2.0.0 | MIT |
+| mdast-util-gfm@3.1.0 | MIT |
+| mdast-util-mdx-expression@2.0.1 | MIT |
+| mdast-util-mdx-jsx@3.2.0 | MIT |
+| mdast-util-mdxjs-esm@2.0.1 | MIT |
+| mdast-util-phrasing@4.1.0 | MIT |
+| mdast-util-to-hast@13.2.1 | MIT |
+| mdast-util-to-markdown@2.2.0 | MIT |
+| mdast-util-to-string@4.0.0 | MIT |
+| micromark-core-commonmark@2.0.4 | MIT |
+| micromark-extension-gfm-autolink-literal@2.1.0 | MIT |
+| micromark-extension-gfm-footnote@2.1.0 | MIT |
+| micromark-extension-gfm-strikethrough@2.1.0 | MIT |
+| micromark-extension-gfm-table@2.1.2 | MIT |
+| micromark-extension-gfm-tagfilter@2.0.0 | MIT |
+| micromark-extension-gfm-task-list-item@2.1.0 | MIT |
+| micromark-extension-gfm@3.0.0 | MIT |
+| micromark-factory-destination@2.0.1 | MIT |
+| micromark-factory-label@2.0.1 | MIT |
+| micromark-factory-space@2.1.0 | MIT |
+| micromark-factory-title@2.0.1 | MIT |
+| micromark-factory-whitespace@2.0.1 | MIT |
+| micromark-util-character@2.1.1 | MIT |
+| micromark-util-chunked@2.0.1 | MIT |
+| micromark-util-classify-character@2.0.1 | MIT |
+| micromark-util-combine-extensions@2.0.1 | MIT |
+| micromark-util-decode-numeric-character-reference@2.0.2 | MIT |
+| micromark-util-decode-string@2.0.1 | MIT |
+| micromark-util-edit-map@1.0.0 | MIT |
+| micromark-util-encode@2.0.1 | MIT |
+| micromark-util-html-tag-name@2.0.1 | MIT |
+| micromark-util-normalize-identifier@2.0.1 | MIT |
+| micromark-util-resolve-all@2.0.1 | MIT |
+| micromark-util-sanitize-uri@2.0.1 | MIT |
+| micromark-util-subtokenize@2.1.0 | MIT |
+| micromark-util-symbol@2.0.1 | MIT |
+| micromark-util-types@2.0.3 | MIT |
+| micromark@4.0.3 | MIT |
+| ms@2.1.3 | MIT |
+| parse-entities@4.0.2 | MIT |
+| property-information@7.2.0 | MIT |
 | react-dom@19.3.1 | MIT |
+| react-markdown@10.1.0 | MIT |
 | react-remove-scroll-bar@2.3.8 | MIT |
 | react-remove-scroll@2.7.2 | MIT |
 | react-router-dom@7.18.4 | MIT |
 | react-router@7.18.4 | MIT |
 | react-style-singleton@2.2.3 | MIT |
 | react@19.3.1 | MIT |
+| rehype-highlight@7.0.2 | MIT |
+| remark-gfm@4.0.1 | MIT |
+| remark-parse@11.0.0 | MIT |
+| remark-rehype@11.1.2 | MIT |
+| remark-stringify@11.0.0 | MIT |
 | scheduler@0.28.0 | MIT |
 | set-cookie-parser@2.7.2 | MIT |
+| space-separated-tokens@2.0.2 | MIT |
+| stringify-entities@4.0.4 | MIT |
+| style-to-js@1.1.21 | MIT |
+| style-to-object@1.0.14 | MIT |
 | tailwind-merge@3.7.0 | MIT |
+| trim-lines@3.0.1 | MIT |
+| trough@2.2.0 | MIT |
 | tslib@2.8.1 | 0BSD |
+| unified@11.0.5 | MIT |
+| unist-util-find-after@5.0.0 | MIT |
+| unist-util-is@6.0.1 | MIT |
+| unist-util-position@5.0.0 | MIT |
+| unist-util-stringify-position@4.0.0 | MIT |
+| unist-util-visit-parents@6.0.2 | MIT |
+| unist-util-visit@5.1.0 | MIT |
 | use-callback-ref@1.3.3 | MIT |
 | use-sidecar@1.1.3 | MIT |
+| vfile-message@4.0.3 | MIT |
+| vfile@6.0.3 | MIT |
+| zwitch@2.0.4 | MIT |

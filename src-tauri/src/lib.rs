@@ -2,6 +2,7 @@
 //! `commands` (IPC) -> `ports` (traits) <- `adapters` / `engine` (implementations) -> `domain` (pure types).
 
 pub mod adapters;
+pub mod ai_commands;
 pub mod commands;
 pub mod config;
 pub mod domain;
@@ -199,6 +200,16 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         });
     }
 
+    let ai = {
+        let ai_store = Arc::new(adapters::ai::store::SqliteAiStore::open(&config.storage.database_path)?);
+        let svc = adapters::ai::service::AiService::new(Arc::new(adapters::ai::ProviderRegistry::builtin()), adapters::ai::credentials::default_store(), ai_store);
+        match svc.startup() {
+            Ok((closed, purged)) => tracing::info!("AI history: {closed} cut-off reply(ies) closed, {purged} expired conversation(s) removed"),
+            Err(e) => tracing::warn!("AI history maintenance failed: {e}"),
+        }
+        svc
+    };
+
     let state = AppState {
         registry,
         detector: platform.clone() as Arc<dyn EnvironmentDetector>,
@@ -222,6 +233,7 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         data_dir,
         rejected_manifests: rejected,
         startup_notices,
+        ai,
         config_path,
         config: std::sync::Mutex::new(config.clone()),
         data_dir_overridden,
@@ -286,6 +298,23 @@ pub fn run() {
             commands::get_install_plan,
             commands::approve_job,
             commands::refresh_tool_states,
+            ai_commands::ai_overview,
+            ai_commands::ai_save_credential,
+            ai_commands::ai_delete_credential,
+            ai_commands::ai_update_config,
+            ai_commands::ai_set_active,
+            ai_commands::ai_update_settings,
+            ai_commands::ai_list_models,
+            ai_commands::ai_test_connection,
+            ai_commands::ai_create_conversation,
+            ai_commands::ai_list_conversations,
+            ai_commands::ai_get_conversation,
+            ai_commands::ai_delete_conversation,
+            ai_commands::ai_delete_all_conversations,
+            ai_commands::ai_send_message,
+            ai_commands::ai_retry,
+            ai_commands::ai_cancel,
+            ai_commands::ai_open_provider_page,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Vixalune")
@@ -293,6 +322,10 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 // Stop running tools (and remove their containers) before the process goes away.
                 if let Some(state) = handle.try_state::<AppState>() {
+                    let stopped = state.ai.cancel_all();
+                    if stopped > 0 {
+                        tracing::info!("stopped {stopped} AI request(s) at shutdown");
+                    }
                     let launch = state.launch.clone();
                     let asked = tauri::async_runtime::block_on(launch.shutdown(std::time::Duration::from_secs(8)));
                     if asked > 0 {

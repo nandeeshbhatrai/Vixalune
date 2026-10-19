@@ -42,6 +42,8 @@ pub enum AppError {
     Platform(PlatformFailure),
     #[error("'{0}' is not implemented in this build yet")]
     NotImplemented(&'static str),
+    #[error("{0}")]
+    Ai(super::ai::AiError),
 }
 
 impl AppError {
@@ -64,6 +66,7 @@ impl AppError {
             Self::VerificationFailed(_) => "verification_failed",
             Self::TimedOut(_) => "timed_out",
             Self::Platform(f) => f.code(),
+            Self::Ai(e) => e.kind.code(),
         }
     }
 
@@ -95,7 +98,14 @@ impl AppError {
             }
             Self::TimedOut(_) => "Check your network connection and available disk space, then retry.",
             Self::Platform(f) => f.recovery(),
+            Self::Ai(e) => e.kind.recovery(),
         }
+    }
+}
+
+impl From<super::ai::AiError> for AppError {
+    fn from(e: super::ai::AiError) -> Self {
+        Self::Ai(e)
     }
 }
 

@@ -1,4 +1,5 @@
 ﻿import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { Backend } from "@/domain/backend";
 import type {
   ActivityEvent,
@@ -20,6 +21,15 @@ import type {
   RunPreview,
   ToolQuery,
   ToolStateEntry,
+  AiConversation,
+  AiConversationDetail,
+  AiModelList,
+  AiOverview,
+  AiProviderView,
+  AiSendAck,
+  AiSettings,
+  AiStreamEvent,
+  AiTestReport,
 } from "@/domain/types";
 
 /** Thin typed wrapper over Tauri IPC. No logic lives here. */
@@ -68,6 +78,27 @@ export const tauriBackend: Backend = {
   updateStorage: (update) => invoke<StorageInfo>("update_storage", { update }),
   openReleasePage: () => invoke<void>("open_release_page"),
   openLink: (toolId, kind) => invoke<void>("open_link", { toolId, kind }),
+  aiOverview: () => invoke<AiOverview>("ai_overview"),
+  aiSaveCredential: (provider, apiKey, label) => invoke<AiProviderView>("ai_save_credential", { provider, apiKey, label }),
+  aiDeleteCredential: (provider) => invoke<AiProviderView>("ai_delete_credential", { provider }),
+  aiUpdateConfig: (config) => invoke<AiProviderView>("ai_update_config", { config }),
+  aiSetActive: (provider) => invoke<AiProviderView>("ai_set_active", { provider }),
+  aiUpdateSettings: (settings) => invoke<AiSettings>("ai_update_settings", { settings }),
+  aiListModels: (provider) => invoke<AiModelList>("ai_list_models", { provider }),
+  aiTestConnection: (provider, model) => invoke<AiTestReport>("ai_test_connection", { provider, model }),
+  aiCreateConversation: (provider, model) => invoke<AiConversation>("ai_create_conversation", { provider, model }),
+  aiListConversations: () => invoke<AiConversation[]>("ai_list_conversations"),
+  aiGetConversation: (id) => invoke<AiConversationDetail>("ai_get_conversation", { id }),
+  aiDeleteConversation: (id) => invoke<void>("ai_delete_conversation", { id }),
+  aiDeleteAllConversations: () => invoke<number>("ai_delete_all_conversations"),
+  aiSendMessage: (input) => invoke<AiSendAck>("ai_send_message", { input }),
+  aiRetry: (conversationId, provider, model) => invoke<AiSendAck>("ai_retry", { conversationId, provider, model }),
+  aiCancel: (requestId) => invoke<void>("ai_cancel", { requestId }),
+  aiOpenProviderPage: (provider, page) => invoke<void>("ai_open_provider_page", { provider, page }),
+  onAiEvent: async (handler) => {
+    const unlisten = await listen<AiStreamEvent>("ai-stream", (e) => handler(e.payload));
+    return unlisten;
+  },
 };
 
 

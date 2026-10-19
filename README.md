@@ -34,6 +34,10 @@ Full instructions, requirements, updating and uninstalling: [docs/INSTALLATION.m
 | [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) | How a release is made and tested, with the 0.2.0 test report |
 | [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/TOOL_MANIFEST_SCHEMA.md](docs/TOOL_MANIFEST_SCHEMA.md), [docs/MANUAL_INTEGRATION_TESTS.md](docs/MANUAL_INTEGRATION_TESTS.md) | Design and test documentation |
 
+## AI assistant (optional)
+
+Bring your own key for OpenAI, Anthropic, Google Gemini or OpenRouter. Keys live only in Windows Credential Manager; messages are sent to the provider you choose. See [docs/AI_GATEWAY.md](docs/AI_GATEWAY.md).
+
 ## Known limitations
 
 - **Not code-signed**, and releases are **not verified reproducible** (two builds of the same sources on the same machine produced different installers). Check the SHA-256 on the release page.

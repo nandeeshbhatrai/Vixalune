@@ -23,6 +23,17 @@
   SetupActionId,
   ToolQuery,
   ToolStateEntry,
+  AiConversation,
+  AiConversationDetail,
+  AiModelList,
+  AiOverview,
+  AiProviderConfig,
+  AiProviderView,
+  AiSendAck,
+  AiSendInput,
+  AiSettings,
+  AiStreamEvent,
+  AiTestReport,
 } from "./types";
 
 /**
@@ -100,6 +111,29 @@ export interface Backend {
   openReleasePage(): Promise<void>;
   /** Opens a catalog link in the default browser. The backend resolves the URL. */
   openLink(toolId: string, kind: LinkKind): Promise<void>;
+
+  // AI gateway. Requests go through the backend; provider logic and keys never reach the interface.
+  aiOverview(): Promise<AiOverview>;
+  /** The key is sent once, stored in Windows Credential Manager and never returned. */
+  aiSaveCredential(provider: string, apiKey: string, label: string | null): Promise<AiProviderView>;
+  aiDeleteCredential(provider: string): Promise<AiProviderView>;
+  aiUpdateConfig(config: AiProviderConfig): Promise<AiProviderView>;
+  aiSetActive(provider: string): Promise<AiProviderView>;
+  aiUpdateSettings(settings: AiSettings): Promise<AiSettings>;
+  aiListModels(provider: string): Promise<AiModelList>;
+  /** A real, minimal request. With a model it also verifies that model. */
+  aiTestConnection(provider: string, model: string | null): Promise<AiTestReport>;
+  aiCreateConversation(provider: string | null, model: string | null): Promise<AiConversation>;
+  aiListConversations(): Promise<AiConversation[]>;
+  aiGetConversation(id: string): Promise<AiConversationDetail>;
+  aiDeleteConversation(id: string): Promise<void>;
+  aiDeleteAllConversations(): Promise<number>;
+  aiSendMessage(input: AiSendInput): Promise<AiSendAck>;
+  aiRetry(conversationId: string, provider: string, model: string): Promise<AiSendAck>;
+  aiCancel(requestId: string): Promise<void>;
+  aiOpenProviderPage(provider: string, page: "key" | "docs"): Promise<void>;
+  /** Streamed answer events. Resolves with the function that stops listening. */
+  onAiEvent(handler: (event: AiStreamEvent) => void): Promise<() => void>;
 }
 
 

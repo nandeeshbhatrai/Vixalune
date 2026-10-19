@@ -120,3 +120,13 @@ calls inherit that. WSL distributions are persistent Linux machines that can be 
 
 Residual risks: the scope check cannot know who owns a target; a tool can open its own connections after start (for example a scanner following links) and the page-level scope applies to the target given, not to every request ZAP makes;
 ZAP's command-line flags and install folder are unverified on real hardware.
+
+## AI gateway (Phase 8)
+
+| Threat | Mitigation | Residual |
+|---|---|---|
+| Key disclosed through logs, DB, UI, errors | Credential Manager only; `Secret` type; error scrubbing; key never returned to React | Malware as the same Windows user |
+| Key sent to the wrong host | HTTPS-only provider addresses, redirects disabled, key only in auth header | None known |
+| Prompt injection via model output causing actions | No tools offered; output rendered as inert text/Markdown | User copies a harmful command and runs it |
+| Sensitive data sent to a cloud provider | Prominent notice; nothing attached automatically; retention control | User pastes sensitive data |
+| Silent provider/model switch or cost surprise | Never switches on failure; cost shown only if provider-reported; bounded retries | Provider-side billing |

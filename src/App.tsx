@@ -1,6 +1,8 @@
 ﻿import { HashRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ActivityPage } from "@/pages/ActivityPage";
+import { AiProvidersPage } from "@/pages/AiProvidersPage";
+import { AssistantPage } from "@/pages/AssistantPage";
 import { Catalog } from "@/pages/Catalog";
 import { Dashboard } from "@/pages/Dashboard";
 import { InstalledTools } from "@/pages/InstalledTools";
@@ -32,6 +34,8 @@ export function AppRoutes({ firstRunRedirect = false }: { firstRunRedirect?: boo
         <Route path="setup" element={<SetupWizard />} />
         <Route path="activity" element={<ActivityPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/ai" element={<AiProvidersPage />} />
+        <Route path="assistant" element={<AssistantPage />} />
         <Route path="*" element={<p>Page not found.</p>} />
       </Route>
     </Routes>

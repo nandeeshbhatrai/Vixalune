@@ -44,6 +44,7 @@ pub struct AppState {
     pub settings: Arc<dyn SettingsProvider>,
     pub saver: Arc<dyn ResultSaver>,
     pub learning: Arc<dyn LearningCatalog>,
+    pub ai: Arc<crate::adapters::ai::service::AiService>,
     pub support: Arc<RunSupport>,
     pub links: Arc<dyn LinkOpener>,
     pub capabilities: Capabilities,

@@ -86,3 +86,11 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Syntax highlighting for assistant code blocks (token classes from highlight.js), following the app theme. */
+.hljs-comment, .hljs-quote { color: var(--muted-foreground); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-built_in { color: #c678dd; }
+.hljs-string, .hljs-attr, .hljs-regexp { color: #2f9e6b; }
+.hljs-number, .hljs-symbol, .hljs-variable, .hljs-template-variable { color: #d19a66; }
+.hljs-title, .hljs-function, .hljs-section, .hljs-name { color: #3b82f6; }
+.hljs-meta, .hljs-type { color: #e5a00d; }

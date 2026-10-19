@@ -3,6 +3,16 @@
 All notable changes to Vixalune. Versions follow semantic versioning while the project is below 1.0: minor versions may change behavior.
 Application updates (this file) are separate from updates to the third-party tools Vixalune installs.
 
+## Unreleased
+
+Added
+- AI gateway with bring-your-own-key for OpenAI, Anthropic, Google Gemini and OpenRouter (see docs/AI_GATEWAY.md). Keys are stored only in Windows Credential Manager and are never returned to the interface; if secure storage is unavailable, saving fails.
+- Settings → AI Providers (key, model, connection test, timeout/temperature/length, retention) and an AI Assistant screen (streaming, stop, retry, Markdown with code highlighting, conversation history).
+
+Known limitations
+- The four provider adapters are implemented against the documented APIs and tested against local mock servers; none has been verified with a real key by the project. Opt-in live tests are provided.
+- Prompts are sent to the cloud provider you choose and billed by it. The assistant cannot run commands.
+
 ## 0.2.0 - first installable release candidate
 
 Added

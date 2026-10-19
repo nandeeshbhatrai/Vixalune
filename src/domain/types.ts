@@ -560,3 +560,197 @@ export interface StorageUpdate {
   tools_dir: string;
   labs_dir: string;
 }
+
+// ---------------------------------------------------------------------------------------------
+// AI gateway. Mirrors src-tauri/src/domain/ai.rs. No type here can carry an API key back from the backend.
+
+export interface AiProviderCapabilities {
+  streaming: boolean;
+  tool_calling: boolean;
+  structured_output: boolean;
+  model_listing: boolean;
+  usage_reporting: boolean;
+  cost_reporting: boolean;
+  cancellation: boolean;
+  context_limits: boolean;
+}
+
+export interface AiProviderDescriptor {
+  id: string;
+  display_name: string;
+  capabilities: AiProviderCapabilities;
+  key_hint: string;
+  key_page: string;
+  docs_page: string;
+  billing_note: string;
+  verification_note: string;
+  extra_settings: string[];
+}
+
+export interface AiProviderConfig {
+  provider: string;
+  label: string | null;
+  default_model: string | null;
+  timeout_secs: number;
+  temperature: number | null;
+  max_output_tokens: number | null;
+  extra: Record<string, string>;
+}
+
+export type AiConnectionState = "untested" | "key_accepted" | "verified" | "failed";
+
+export interface AiTestStep {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface AiProviderStatus {
+  state: AiConnectionState;
+  tested_at: string | null;
+  error_code: string | null;
+  message: string | null;
+  steps: AiTestStep[];
+  models_listed: number | null;
+  verified_models: string[];
+}
+
+export type AiErrorKind =
+  | "authentication"
+  | "permission"
+  | "quota"
+  | "rate_limit"
+  | "network"
+  | "timeout"
+  | "model_not_found"
+  | "invalid_request"
+  | "content_filtered"
+  | "server"
+  | "overloaded"
+  | "cancelled"
+  | "unsupported"
+  | "configuration"
+  | "credential_store"
+  | "protocol"
+  | "too_large";
+
+export interface AiErrorInfo {
+  code: string;
+  kind: AiErrorKind;
+  message: string;
+  recovery: string;
+}
+
+export interface AiProviderView {
+  descriptor: AiProviderDescriptor;
+  config: AiProviderConfig;
+  has_key: boolean;
+  /** Masked description of the saved key, e.g. "sk-ant-••••••••  (108 characters)". */
+  key_hint: string | null;
+  status: AiProviderStatus;
+  active: boolean;
+  credential_error: AiErrorInfo | null;
+}
+
+export interface AiSettings {
+  history_days: number;
+}
+
+export interface AiOverview {
+  providers: AiProviderView[];
+  credential_backend: string;
+  settings: AiSettings;
+}
+
+export interface AiModelInfo {
+  id: string;
+  display_name: string | null;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  supports_tools: boolean | null;
+  pricing: { input_per_mtok: number | null; output_per_mtok: number | null } | null;
+  source: "listed" | "verified";
+}
+
+export interface AiModelList {
+  models: AiModelInfo[];
+  from_provider: boolean;
+  note: string;
+}
+
+export interface AiTestReport {
+  ok: boolean;
+  state: AiConnectionState;
+  steps: AiTestStep[];
+  models_listed: number | null;
+  verified_model: string | null;
+  error: AiErrorInfo | null;
+}
+
+export interface AiUsage {
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  /** US dollars as reported by the provider; null when the provider reports none. Never estimated. */
+  cost_usd: number | null;
+}
+
+export type AiMessageStatus = "complete" | "streaming" | "failed" | "cancelled" | "interrupted";
+export type AiRole = "system" | "user" | "assistant" | "tool";
+
+export interface AiMessage {
+  id: string;
+  conversation_id: string;
+  seq: number;
+  role: AiRole;
+  content: string;
+  status: AiMessageStatus;
+  error_code: string | null;
+  error_message: string | null;
+  provider: string | null;
+  model: string | null;
+  usage: AiUsage | null;
+  created_at: string;
+}
+
+export interface AiConversation {
+  id: string;
+  title: string;
+  provider: string | null;
+  model: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiConversationDetail {
+  conversation: AiConversation;
+  messages: AiMessage[];
+}
+
+export interface AiSendInput {
+  conversation_id: string;
+  text: string;
+  provider: string;
+  model: string;
+}
+
+export interface AiSendAck {
+  request_id: string;
+  conversation_id: string;
+  user_message: AiMessage;
+  assistant_message_id: string;
+}
+
+export type AiStreamEvent = { request_id: string; conversation_id: string; message_id: string } & (
+  | { event: "started"; provider: string; model: string }
+  | { event: "delta"; text: string }
+  | { event: "retrying"; attempt: number; wait_secs: number; reason: string }
+  | { event: "usage"; usage: AiUsage }
+  | {
+      event: "finished";
+      status: AiMessageStatus;
+      finish_reason: string | { other: string } | null;
+      usage: AiUsage;
+      error: AiErrorInfo | null;
+    }
+);

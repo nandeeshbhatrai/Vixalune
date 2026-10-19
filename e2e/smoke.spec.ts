@@ -100,3 +100,11 @@ test("first launch opens the welcome tour, then the setup wizard explains and as
   await expect(page.getByRole("dialog")).toBeHidden();
 });
 
+
+test("AI screens never invent providers or answers in the demonstration", async ({ page }) => {
+  await page.goto("/#/settings/ai");
+  await expect(page.getByRole("heading", { level: 1, name: "AI Providers" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("not available in the demonstration");
+  await page.goto("/#/assistant");
+  await expect(page.getByRole("alert")).toContainText("not available in the demonstration");
+});

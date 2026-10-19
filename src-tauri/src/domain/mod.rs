@@ -1,6 +1,7 @@
 ﻿//! Pure domain layer: types, validation and state machines. No I/O, no Tauri.
 
 pub mod activity;
+pub mod ai;
 pub mod container;
 pub mod environment;
 pub mod errors;
@@ -15,6 +16,7 @@ pub mod paths;
 pub mod platform;
 pub mod process;
 pub mod runs;
+pub mod secret;
 pub mod scope;
 pub mod settings;
 pub mod storage;

@@ -42,3 +42,11 @@ Only the newest release receives fixes. Vixalune is below 1.0; behavior may chan
 ## Safe use
 
 Only test systems you own or have written permission to test. Do not point Vixalune at production systems, other people's networks or the public internet because a tutorial says so. Treat saved output as sensitive: it can contain addresses, banners and findings.
+
+## AI provider keys and prompts
+
+- API keys are stored only in Windows Credential Manager (no custom encryption, no file/database fallback; saving fails closed). They are never returned to the interface, logged, put in URLs or error messages, or kept in SQLite/settings.
+- The `Secret` type has no `Debug`/`Display`/`Serialize` and is wiped on drop; provider errors are scrubbed of the key before display or storage; messages that contain key-shaped text are refused before sending.
+- Redirects are disabled and provider addresses must be HTTPS, so a key cannot follow a redirect.
+- Model output is untrusted: rendered as Markdown without raw HTML, images or live links; no tools are offered to a model, so output can never run a command.
+- Residual risk: local malware or a compromised Windows session can use credentials the app can use. Prompts go to the cloud provider. See docs/AI_GATEWAY.md.

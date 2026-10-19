@@ -522,8 +522,35 @@ export function createDemoBackend(): Backend {
     openLink: async () => {
       // Demo URLs are placeholders; nothing is opened.
     },
+    // The demonstration never pretends to talk to an AI provider or to store a key.
+    aiOverview: noAi,
+    aiSaveCredential: noAi,
+    aiDeleteCredential: noAi,
+    aiUpdateConfig: noAi,
+    aiSetActive: noAi,
+    aiUpdateSettings: noAi,
+    aiListModels: noAi,
+    aiTestConnection: noAi,
+    aiCreateConversation: noAi,
+    aiListConversations: noAi,
+    aiGetConversation: noAi,
+    aiDeleteConversation: noAi,
+    aiDeleteAllConversations: noAi,
+    aiSendMessage: noAi,
+    aiRetry: noAi,
+    aiCancel: noAi,
+    aiOpenProviderPage: noAi,
+    onAiEvent: async () => () => {},
   };
 }
 
 
 
+
+function noAi(): Promise<never> {
+  return Promise.reject({
+    code: "demo_ai",
+    message: "AI providers are not available in the demonstration.",
+    recovery: "Run the desktop app (npm run tauri:dev or the installed app) to add a provider and chat. Vixalune never shows invented AI answers.",
+  });
+}

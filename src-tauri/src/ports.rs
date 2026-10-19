@@ -404,3 +404,85 @@ pub trait LearningCatalog: Send + Sync {
     fn list(&self) -> Vec<crate::domain::learning::Tutorial>;
     fn get(&self, id: &ToolId) -> AppResult<crate::domain::learning::Tutorial>;
 }
+
+// ------------------------------------------------------------------ AI gateway
+
+/// Where API keys live. Implementations use the operating system's credential protection and fail closed: if it is not
+/// available they return an error; they never fall back to files, the database or settings.
+pub trait CredentialStore: Send + Sync {
+    fn set(&self, provider: &str, secret: &crate::domain::secret::Secret) -> crate::domain::ai::AiResult<()>;
+    fn get(&self, provider: &str) -> crate::domain::ai::AiResult<Option<crate::domain::secret::Secret>>;
+    /// `true` if a credential existed.
+    fn delete(&self, provider: &str) -> crate::domain::ai::AiResult<bool>;
+    fn exists(&self, provider: &str) -> crate::domain::ai::AiResult<bool>;
+    /// Plain-words name of the protection in use, shown in the UI.
+    fn backend_name(&self) -> &'static str;
+}
+
+/// Receives the pieces of a response as they arrive.
+pub trait StreamSink: Send + Sync {
+    fn event(&self, event: &crate::domain::ai::StreamEvent);
+}
+
+/// One hosted-model provider. Adapters translate the normalized request into the provider's own API and back.
+#[async_trait]
+pub trait AiProvider: Send + Sync {
+    fn descriptor(&self) -> crate::domain::ai::ProviderDescriptor;
+    /// Provider-specific checks on a configuration (ranges the provider enforces, extra settings).
+    fn validate_config(&self, config: &crate::domain::ai::ProviderConfig) -> crate::domain::ai::AiResult<()>;
+    /// Provider-specific checks on a request before anything is sent (unsupported features, parameter ranges).
+    fn validate_request(&self, request: &crate::domain::ai::ChatRequest) -> crate::domain::ai::AiResult<()>;
+    /// The cheapest authenticated request the provider offers; succeeds only if the key is accepted.
+    async fn check_auth(&self, key: &crate::domain::secret::Secret, timeout: Duration, cancel: &CancellationToken) -> crate::domain::ai::AiResult<()>;
+    /// The provider's own model list. `Unsupported` if it has none.
+    async fn list_models(&self, key: &crate::domain::secret::Secret, timeout: Duration, cancel: &CancellationToken) -> crate::domain::ai::AiResult<Vec<crate::domain::ai::ModelInfo>>;
+    /// Send the conversation and stream the answer. Must stop promptly when `cancel` fires, never retry by itself, and never
+    /// put the key anywhere but the authentication header.
+    async fn chat_stream(
+        &self,
+        key: &crate::domain::secret::Secret,
+        request: &crate::domain::ai::ChatRequest,
+        config: &crate::domain::ai::ProviderConfig,
+        sink: &dyn StreamSink,
+        cancel: &CancellationToken,
+    ) -> crate::domain::ai::AiResult<crate::domain::ai::ChatOutcome>;
+}
+
+/// Conversations, messages and non-secret provider settings.
+pub trait AiStore: Send + Sync {
+    fn get_config(&self, provider: &str) -> AppResult<Option<crate::domain::ai::ProviderConfig>>;
+    fn put_config(&self, config: &crate::domain::ai::ProviderConfig) -> AppResult<()>;
+    fn delete_config(&self, provider: &str) -> AppResult<()>;
+    fn get_status(&self, provider: &str) -> AppResult<crate::domain::ai::ProviderStatus>;
+    fn put_status(&self, provider: &str, status: &crate::domain::ai::ProviderStatus) -> AppResult<()>;
+    /// A masked, non-secret description of the saved key (recognised prefix and length), shown in the UI.
+    fn get_key_hint(&self, provider: &str) -> AppResult<Option<String>>;
+    fn put_key_hint(&self, provider: &str, hint: Option<&str>) -> AppResult<()>;
+    fn get_settings(&self) -> AppResult<crate::domain::ai::AiSettings>;
+    fn put_settings(&self, s: &crate::domain::ai::AiSettings) -> AppResult<()>;
+    fn active_provider(&self) -> AppResult<Option<String>>;
+    fn set_active_provider(&self, provider: Option<&str>) -> AppResult<()>;
+
+    fn create_conversation(&self, c: &crate::domain::ai::Conversation) -> AppResult<()>;
+    fn update_conversation(&self, c: &crate::domain::ai::Conversation) -> AppResult<()>;
+    fn get_conversation(&self, id: &str) -> AppResult<crate::domain::ai::Conversation>;
+    fn list_conversations(&self, limit: usize) -> AppResult<Vec<crate::domain::ai::Conversation>>;
+    fn delete_conversation(&self, id: &str) -> AppResult<()>;
+    fn delete_all_conversations(&self) -> AppResult<usize>;
+
+    /// Stores the message with the next sequence number of its conversation and returns it.
+    fn append_message(&self, m: &crate::domain::ai::StoredMessage) -> AppResult<crate::domain::ai::StoredMessage>;
+    fn update_message(&self, m: &crate::domain::ai::StoredMessage) -> AppResult<()>;
+    fn list_messages(&self, conversation_id: &str) -> AppResult<Vec<crate::domain::ai::StoredMessage>>;
+    fn delete_message(&self, id: &str) -> AppResult<()>;
+
+    /// Delete conversations last touched before `cutoff` (RFC 3339). Returns how many.
+    fn purge_conversations_before(&self, cutoff: &str) -> AppResult<usize>;
+    /// After a restart nothing is streaming: any message still marked so was cut short.
+    fn close_streaming_messages(&self) -> AppResult<usize>;
+}
+
+/// Delivers streaming events to the user interface.
+pub trait AiEventSink: Send + Sync {
+    fn emit(&self, event: crate::domain::ai::AiUiEvent);
+}

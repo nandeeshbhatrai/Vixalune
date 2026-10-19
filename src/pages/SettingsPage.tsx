@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { AsyncView } from "@/components/AsyncView";
 import { PageHeader } from "@/components/PageHeader";
 import { AboutAndUpdates } from "@/components/AboutAndUpdates";
@@ -34,6 +35,10 @@ export function SettingsPage() {
             ))}
           </div>
         </fieldset>
+      </Card>
+      <Card>
+        <CardTitle>AI</CardTitle>
+        <p>Add your own API key for OpenAI, Google Gemini, Anthropic or OpenRouter. <Link className="text-primary underline" to="/settings/ai">Manage AI Providers</Link></p>
       </Card>
       <ScopeAndRetention />
       <AsyncView state={info} retry={retry} label="Loading app info">

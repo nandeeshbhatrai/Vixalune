@@ -22,6 +22,7 @@ import type {
   VerificationOutcome,
   MaintenanceStatus,
   Prerequisite,
+  Readiness,
   RuntimeKind,
 } from "@/domain/types";
 
@@ -80,7 +81,7 @@ export const STATUS_META: Record<ToolStatus, { label: string; tone: Tone; descri
   error: { label: "Error", tone: "danger", description: "The last operation failed." },
 };
 
-export const JOB_KIND_LABEL: Record<JobKind, string> = { install: "Install", update: "Update", uninstall: "Uninstall", verify: "Verify", run: "Run" };
+export const JOB_KIND_LABEL: Record<JobKind, string> = { install: "Install", update: "Update", uninstall: "Uninstall", verify: "Verify", run: "Run", setup: "Setup" };
 
 export const JOB_PHASE_META: Record<JobPhase, { label: string; tone: Tone }> = {
   queued: { label: "Queued", tone: "neutral" },
@@ -89,6 +90,7 @@ export const JOB_PHASE_META: Record<JobPhase, { label: string; tone: Tone }> = {
   installing: { label: "Installing", tone: "info" },
   verifying: { label: "Verifying", tone: "info" },
   uninstalling: { label: "Uninstalling", tone: "warning" },
+  running: { label: "Running", tone: "info" },
   cancelling: { label: "Cancelling", tone: "warning" },
   rolling_back: { label: "Rolling back", tone: "warning" },
   succeeded: { label: "Succeeded", tone: "success" },
@@ -103,6 +105,7 @@ export const ACTIVE_PHASES: JobPhase[] = [
   "installing",
   "verifying",
   "uninstalling",
+  "running",
   "cancelling",
   "rolling_back",
 ];
@@ -116,6 +119,13 @@ export const PROVENANCE_LABEL = {
   package_repository: "via a package repository",
   community_maintained: "community maintained",
 } as const;
+
+export const READINESS_META: Record<Readiness, { label: string; tone: Tone }> = {
+  ready: { label: "Ready", tone: "success" },
+  needs_setup: { label: "Needs setup", tone: "warning" },
+  blocked: { label: "Blocked", tone: "danger" },
+  unknown: { label: "Unknown", tone: "neutral" },
+};
 
 export const ELEVATION_LABEL: Record<ElevationNeed, string> = {
   none: "Not needed",
@@ -149,7 +159,7 @@ export function describeInstall(spec: InstallSpec): string {
     case "wsl_apt":
       return `apt in WSL: ${spec.packages.join(", ")}`;
     case "container_image":
-      return `container image ${spec.image} (digest-pinned)`;
+      return `container image ${spec.image} (pulled by digest)`;
     case "download_archive":
       return `checksum-verified download from ${new URL(spec.url).host}`;
   }
@@ -169,5 +179,6 @@ export function formatTime(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+
 
 

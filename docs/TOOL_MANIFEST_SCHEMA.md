@@ -1,4 +1,4 @@
-# Tool Manifest Schema (v2)
+﻿# Tool Manifest Schema (v2)
 
 Manifests are **TOML data files** in `manifests/*.toml`. The authoritative definition is the Rust types in `src-tauri/src/domain/manifest.rs`; this document describes them. Unknown keys are rejected everywhere (tables *and* tagged variants). A manifest cannot contain scripts or commands: it selects one of a closed set of install adapters and supplies typed values.
 
@@ -86,6 +86,27 @@ Arg templates: `literal`, `value`, `flag` (boolean param → flag), `option` (fl
 
 See `manifests/trivy.toml` (verified end to end on Windows 11) and `manifests/nmap.toml` (with a launch profile).
 
+## Container policy and container launch profiles
+
+A manifest with a container launch profile needs a `[container]` table. It can only *tighten*; privileged mode, host namespaces, devices, extra capabilities and the Docker socket cannot be expressed.
+
+| Field | Rules |
+|---|---|
+| `user` | numeric non-root `uid:gid` (`root`, `0`, `0:0`, names are rejected) |
+| `read_only_rootfs` | default true |
+| `memory_mb` 64-16384, `cpus_milli` 100-8000, `pids_limit` 16-4096 | resource limits (always applied) |
+| `tmpfs` | absolute POSIX paths, mounted `rw,noexec,nosuid,size=64m` |
+| `workdir` | absolute POSIX path |
+| `env` | up to 16 fixed `{name,value}` pairs; names matching TOKEN/SECRET/PASSWORD/API_KEY/… are rejected |
+| `mounts` | up to 4 `{name, container_path, read_only}`; container paths under `/proc /sys /dev /etc /run /var/run` are rejected; the **host folder is never in the manifest** |
+| `ports` | container ports a profile may publish (host side chosen by the user, loopback only) |
+
+Launch profile additions (`runtime = "container"`): `mounts` (names the user must supply a folder for), `needs_network` (default false; requires approval each run), `ports`. Profiles with other runtimes may not set them.
+
+Install `image` must be a bare name without tag; its registry must be on the configured allow-list; the digest is mandatory (`docker pull registry/repo@sha256:…`).
+
+For `wsl_apt` installs the `[[prerequisites]]` entry `wsl2` describes WSL itself; its `requires_admin`/`requires_restart` only apply while WSL is missing.
+
 ## Trust
 
 Trust is **not** a manifest field. The registry assigns `bundled` to manifests loaded from the app bundle and `remote_unsigned` to any future downloaded manifest. Remote manifests are disabled; when added they pass the same validator and can only select existing adapters.
@@ -101,3 +122,4 @@ Trust is **not** a manifest field. The registry assigns `bundled` to manifests l
 | Semgrep | container image `semgrep/semgrep` pinned by digest | Docker Hub API | No — no container adapter yet, install is refused |
 
 Install locations in `verify.locations` for Nmap and Wireshark are conventional guesses until those installs are exercised; a wrong guess makes verification fail (never pass).
+

@@ -1,4 +1,4 @@
-//! Application-layer interfaces ("ports"). The UI/command layer depends only on these traits;
+﻿//! Application-layer interfaces ("ports"). The UI/command layer depends only on these traits;
 //! platform adapters and storage implement them. Everything is `Send + Sync` so
 //! implementations can be shared as `Arc<dyn Trait>` (constructor injection).
 
@@ -8,10 +8,12 @@ use crate::domain::install_state::InstallState;
 use crate::domain::jobs::{
     InstallationRecord, InstalledTool, Job, ToolStateEntry, VerificationLevel, VerificationOutcome,
 };
+use crate::domain::container::{RunApprovals, RunSummary};
 use crate::domain::lab::{LabDefinition, LabState};
+use crate::domain::platform::{PlatformReport, SetupActionId};
 use crate::domain::manifest::{CommandPreview, InstallMethod, InstallSpec, ParamValue, ToolManifest};
 use crate::domain::process::{CancellationToken, InstallPlan, OutputSink, OutputStream, ProcessSpec, ProcessStatus};
-use crate::domain::{AppResult, LabId, OperationId, ProcessId, RunId, ToolId};
+use crate::domain::{AppResult, LabId, OperationId, ProcessId, ToolId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -50,9 +52,59 @@ pub trait ToolRegistry: Send + Sync {
 
 // ------------------------------------------------------------------ environment
 
+#[async_trait]
 pub trait EnvironmentDetector: Send + Sync {
-    /// Blocking: probes external programs. Call from a blocking-capable thread.
-    fn detect(&self) -> EnvironmentReport;
+    /// Component view (winget / WSL 2 / container engine) used by dependency resolution.
+    async fn detect(&self) -> EnvironmentReport;
+}
+
+/// Full, honest description of the machine: facts, readiness and proposed (never performed) setup.
+#[async_trait]
+pub trait PlatformDetector: Send + Sync {
+    async fn detect(&self) -> PlatformReport;
+}
+
+/// Non-process facts about the Windows host. A trait so detection is testable with mocks.
+pub trait HostFacts: Send + Sync {
+    /// (build number, display version such as "24H2", edition id)
+    fn windows(&self) -> (Option<u32>, Option<String>, Option<String>);
+    fn architecture(&self) -> String;
+    /// Hardware virtualization enabled in firmware.
+    fn firmware_virtualization(&self) -> Option<bool>;
+    fn hypervisor_present(&self) -> Option<bool>;
+    /// (free bytes, total bytes) of the volume containing `path`.
+    fn disk(&self, path: &std::path::Path) -> Option<(u64, u64)>;
+    fn pending_restart(&self) -> Option<bool>;
+    /// Proxy `host:port` if configured; never credentials.
+    fn proxy(&self) -> Option<String>;
+    fn policy_keys(&self) -> Vec<String>;
+    fn is_elevated(&self) -> Option<bool>;
+    /// Value of the `DOCKER_HOST` environment variable, if set.
+    fn docker_host_env(&self) -> Option<String>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ElevatedOutcome {
+    pub exit_code: Option<i32>,
+    /// The user declined the Windows administrator (UAC) prompt; nothing was changed.
+    pub declined: bool,
+}
+
+/// Runs ONE fixed command with administrator rights after the OS shows its own consent prompt.
+/// Output cannot be captured from an elevated process; only the exit code is returned.
+#[async_trait]
+pub trait ElevatedRunner: Send + Sync {
+    async fn run(&self, program: &std::path::Path, args: &[String], timeout: Duration) -> AppResult<ElevatedOutcome>;
+}
+
+/// System changes proposed by the setup wizard. Every method requires `confirmed == true`.
+#[async_trait]
+pub trait SetupManager: Send + Sync {
+    /// Run an automatic setup action as a tracked job.
+    async fn run_action(&self, id: SetupActionId, confirmed: bool) -> AppResult<OperationId>;
+    /// Schedule a Windows restart after `delay_secs`. Never happens without `confirmed`.
+    async fn request_restart(&self, confirmed: bool, delay_secs: u32) -> AppResult<()>;
+    async fn cancel_restart(&self) -> AppResult<()>;
 }
 
 pub trait DependencyResolver: Send + Sync {
@@ -215,18 +267,20 @@ pub trait ProcessManager: Send + Sync {
     fn status(&self, id: ProcessId) -> AppResult<ProcessStatus>;
 }
 
+/// What a launch would do, shown before the user approves it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunPreview {
+    pub command: CommandPreview,
+    /// Present for container profiles: image, user, network, mounts, ports, limits, warnings.
+    pub container: Option<RunSummary>,
+}
+
 #[async_trait]
 pub trait ToolRunner: Send + Sync {
-    /// Validate parameters and build the exact command without running it.
-    fn preview(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>) -> AppResult<CommandPreview>;
-    async fn start(
-        &self,
-        id: &ToolId,
-        profile: &str,
-        values: &HashMap<String, ParamValue>,
-        output: Arc<dyn OutputSink>,
-    ) -> AppResult<RunId>;
-    async fn stop(&self, run: RunId) -> AppResult<()>;
+    /// Validate parameters and approvals and describe the exact run without starting it.
+    fn preview(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<RunPreview>;
+    /// Start the run as a tracked job (output, state and cancellation go through the job system).
+    async fn start(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>, approvals: &RunApprovals) -> AppResult<OperationId>;
 }
 
 // ------------------------------------------------------------------ labs
@@ -262,3 +316,5 @@ pub trait ActivityLogger: Send + Sync {
     fn record(&self, event: ActivityEvent) -> AppResult<()>;
     fn recent(&self, limit: usize) -> AppResult<Vec<ActivityEvent>>;
 }
+
+

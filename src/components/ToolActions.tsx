@@ -5,6 +5,7 @@ import { AsyncView } from "@/components/AsyncView";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { JobProgress } from "@/components/JobProgress";
+import { LaunchDialog } from "@/components/LaunchDialog";
 import { Button } from "@/components/ui/button";
 import { actionsFor, type ToolAction } from "@/domain/toolStatus";
 import type { CatalogEntry, InstallPlan } from "@/domain/types";
@@ -75,8 +76,13 @@ function PlanDetails({ plan }: { plan: InstallPlan }) {
           </ul>
         </div>
       ) : null}
+      {plan.notes.map((n) => (
+        <p key={n} role="note" className="text-xs text-warning">
+          {n}
+        </p>
+      ))}
       <p className="text-xs text-muted-foreground">
-        Installing accepts the package&apos;s license on your behalf (license: <span className="font-mono">{plan.license}</span>). Review it first if you are unsure. Vixalune never changes your PATH, but the package manager may add the tool to it.
+        Installing accepts the package&apos;s license on your behalf (license: <span className="font-mono">{plan.license}</span>). Review it first if you are unsure.
       </p>
     </div>
   );
@@ -95,6 +101,7 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
   const [confirm, setConfirm] = useState<"install" | "uninstall" | null>(null);
   const [elevationOk, setElevationOk] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [launching, setLaunching] = useState(false);
 
   const caps = ws.core.status === "ready" ? ws.core.data.caps : null;
   const status = ws.statusOf(m.id);
@@ -102,7 +109,10 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
   const activeJob = ws.activeJobFor(m.id);
   const hasAdapter = caps ? m.install.some((i) => caps.install_methods.includes(i.method)) : true;
   const blocked = hasAdapter ? undefined : `Installing this tool needs the ${m.install.map((i) => METHOD_LABEL[i.method]).join(" or ")} installer, which this version of Vixalune does not include yet.`;
-  const actions = activeJob ? [] : actionsFor(status, caps, missing, blocked);
+  const hasProfiles = m.launch_profiles.length > 0;
+  const actions = (activeJob ? [] : actionsFor(status, caps, missing, blocked)).map((a) =>
+    a.action === "launch" && !hasProfiles ? { ...a, enabled: false, reason: "This tool has no launch profile yet." } : a,
+  );
 
   const [plan, retryPlan] = useAsync<InstallPlan | null>(
     () => (confirm === "install" ? backend.getInstallPlan(m.id) : Promise.resolve(null)),
@@ -129,8 +139,7 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
           await backend.verifyTool(m.id);
           return "Verification started.";
         case "launch":
-          await backend.launchTool(m.id);
-          return `${m.name} was launched.`;
+          return "";
       }
     });
     if (message) {
@@ -144,6 +153,7 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
     clearError();
     setElevationOk(false);
     if (a === "install" || a === "uninstall") setConfirm(a);
+    else if (a === "launch") setLaunching(true);
     else void perform(a);
   };
 
@@ -192,6 +202,16 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
         </p>
       ) : null}
       {error && !confirm && !activeJob ? <ErrorNotice error={error} /> : null}
+
+      <LaunchDialog
+        entry={entry}
+        open={launching}
+        onOpenChange={setLaunching}
+        onStarted={(msg) => {
+          setNotice(msg);
+          ws.refreshAll();
+        }}
+      />
 
       <ConfirmDialog
         open={confirm === "install"}
@@ -248,4 +268,5 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
     </div>
   );
 }
+
 

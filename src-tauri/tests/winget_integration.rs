@@ -1,4 +1,4 @@
-//! Opt-in integration tests against the REAL Windows Package Manager. They are `#[ignore]`d, so
+﻿//! Opt-in integration tests against the REAL Windows Package Manager. They are `#[ignore]`d, so
 //! `cargo test` never touches the machine. Run them explicitly:
 //!
 //! Read-only (no installation; needs network):
@@ -15,7 +15,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use vixalune_lib::adapters::activity_sqlite::SqliteActivityLogger;
-use vixalune_lib::adapters::env_detector::SystemEnvironmentDetector;
+use vixalune_lib::adapters::host_facts::WindowsHostFacts;
+use vixalune_lib::adapters::platform_detector::SystemPlatformDetector;
 use vixalune_lib::adapters::executor::SystemCommandExecutor;
 use vixalune_lib::adapters::locator::SystemExecutableLocator;
 use vixalune_lib::adapters::registry::ManifestRegistry;
@@ -37,7 +38,13 @@ fn engine() -> (InstallEngine, Arc<SqliteJobStore>, tempfile::TempDir) {
     let adapter = Arc::new(WingetAdapter::new(Arc::new(SystemCommandExecutor), Arc::new(SystemExecutableLocator)));
     let engine = InstallEngine::new(EngineDeps {
         registry: Arc::new(registry),
-        detector: Arc::new(SystemEnvironmentDetector),
+        detector: Arc::new(SystemPlatformDetector::new(
+            Arc::new(SystemCommandExecutor),
+            Arc::new(SystemExecutableLocator),
+            Arc::new(WindowsHostFacts),
+            dir.path().to_path_buf(),
+            None,
+        )),
         resolver: Arc::new(BasicDependencyResolver),
         adapters: vec![adapter],
         store: store.clone(),
@@ -117,3 +124,4 @@ async fn real_install_verify_and_uninstall_of_trivy() {
     assert_eq!(engine.state(&trivy).unwrap(), InstallState::NotInstalled);
     assert_eq!(engine.list().unwrap().len(), 2);
 }
+

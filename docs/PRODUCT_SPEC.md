@@ -54,6 +54,10 @@ All seven screens exist: Dashboard, Tool Catalog (search + category/platform/exe
 
 Install, cancel, retry, update, uninstall and verify now run as persisted, audited jobs through the winget adapter (F4 delivered for winget). Progress, output, exit codes and recovery text reach the UI; state survives restarts. Launching tools, labs, and non-winget adapters remain future work.
 
+### Phase 4 status
+
+Environment readiness (Windows, virtualization, WSL + distributions, container engine, winget, disk, restart/proxy/policy hints), the first-run Setup wizard (check, explain, list missing, guided or confirmed steps, restart control, re-check), a WSL apt adapter, a local-Docker container adapter and a hardened container launcher. Supported setup changes: install WSL (UAC, explicit), install Ubuntu (explicit), schedule/cancel a restart (explicit). Everything else is guidance with official links. See ARCHITECTURE.md for the unsupported-combination table.
+
 ## 6. Non-functional requirements
 
 - **Safety:** no shell string construction; manifests are data only; no silent elevation (THREAT_MODEL.md).
@@ -80,4 +84,5 @@ See "Acceptance criteria" in the README and the results summarized at the end of
 - No code signing, installer packaging, or auto-update.
 - No remote manifest source; `remote_manifests_enabled` is forced to `false` in practice.
 - Playwright tests exercise the web frontend against the mock backend, not the packaged Tauri window.
+
 

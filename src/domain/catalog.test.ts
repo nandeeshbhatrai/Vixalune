@@ -1,4 +1,4 @@
-import { DEMO_TOOLS } from "@/infra/demoBackend";
+﻿import { DEMO_TOOLS } from "@/infra/demoBackend";
 import { EMPTY_FILTERS, filterAndSort, hasActiveFilters } from "./catalog";
 import type { ToolStatus } from "./toolStatus";
 
@@ -8,7 +8,7 @@ const names = (f: Partial<typeof EMPTY_FILTERS>, sort: Parameters<typeof filterA
 
 describe("filterAndSort", () => {
   it("returns everything sorted by name by default", () => {
-    expect(names({})).toEqual(["nmap", "zap", "semgrep", "trivy", "wireshark"].sort((a, b) => nameOf(a).localeCompare(nameOf(b))));
+    expect(names({})).toEqual(["nmap", "zap", "semgrep", "trivy", "wireshark", "nikto"].sort((a, b) => nameOf(a).localeCompare(nameOf(b))));
   });
 
   it("searches name, summary and description case-insensitively", () => {
@@ -43,3 +43,4 @@ describe("filterAndSort", () => {
 function nameOf(id: string) {
   return DEMO_TOOLS.find((t) => t.manifest.id === id)!.manifest.name;
 }
+

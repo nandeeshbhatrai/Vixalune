@@ -1,4 +1,4 @@
-//! SQLite persistence for jobs, job output and installation records.
+﻿//! SQLite persistence for jobs, job output and installation records.
 //!
 //! A partial unique index guarantees at most one *active* job per tool even across processes, so
 //! duplicate installation requests cannot corrupt an installation.
@@ -240,7 +240,7 @@ impl JobStore for SqliteJobStore {
         for mut job in active {
             // Jobs that had not touched the system yet are simply cancelled; the rest are failed
             // because their real effect is unknown until the tool is re-checked.
-            let touched = matches!(job.phase, JobPhase::Installing | JobPhase::Verifying | JobPhase::Uninstalling | JobPhase::Cancelling | JobPhase::RollingBack);
+            let touched = matches!(job.phase, JobPhase::Installing | JobPhase::Verifying | JobPhase::Uninstalling | JobPhase::Running | JobPhase::Cancelling | JobPhase::RollingBack);
             if touched {
                 job.phase = JobPhase::Failed;
                 job.error = Some(JobError {
@@ -436,3 +436,4 @@ mod tests {
         assert_eq!(s.get_installation(&tool).unwrap(), None);
     }
 }
+

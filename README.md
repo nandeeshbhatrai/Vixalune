@@ -2,7 +2,7 @@
 
 A Windows desktop app for beginners to discover, install, run and learn about open-source security tools from one place. For **authorized testing and local labs only**.
 
-Status: **Phase 3** — workbench UI on a real installation engine. Install, verify, update, uninstall, cancel/retry and persisted jobs work through one adapter (winget). Launching tools, labs, and the WSL/container/archive adapters are **not implemented**; the UI marks them unavailable. See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). Screenshots (demo data) are in `docs/screenshots/`.
+Status: **Phase 4** — platform integration. Environment readiness, a first-run Setup wizard, and adapters for winget, WSL 2 (apt) and local Docker containers on top of the Phase 3 engine. Only the winget path has been exercised against real software; the WSL and container paths are **mock-tested** because the development PC cannot run them (see [docs/MANUAL_INTEGRATION_TESTS.md](docs/MANUAL_INTEGRATION_TESTS.md)). Launching Windows/WSL tools and the verified-archive adapter are **not implemented**. See [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md). Screenshots (demo data) are in `docs/screenshots/`.
 
 | Doc | Purpose |
 |---|---|
@@ -10,6 +10,7 @@ Status: **Phase 3** — workbench UI on a real installation engine. Install, ver
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, interfaces, state machine, decisions |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Threats and mitigations |
 | [docs/TOOL_MANIFEST_SCHEMA.md](docs/TOOL_MANIFEST_SCHEMA.md) | Manifest format |
+| [docs/MANUAL_INTEGRATION_TESTS.md](docs/MANUAL_INTEGRATION_TESTS.md) | Manual Windows tests for WSL, containers and setup |
 
 ## Prerequisites (Windows 11 / Windows 10 22H2, x64)
 
@@ -66,17 +67,18 @@ e2e/              Playwright tests
 
 ## What genuinely works (Windows 11, verified 2026-10-17)
 
-- **Adapter**: winget (Windows Package Manager) only. WSL, container and archive installs are refused with an explanation until their adapters exist.
+- **Adapters**: winget (real-tested), WSL apt and local Docker (mock-tested; see below). Verified-archive installs are refused.
 - **Tool proven end to end on real Windows**: **Trivy** — real `winget install`, verification by running `trivy.exe --version` plus winget's package record, persisted record, then real uninstall (see the integration test below).
 - **Tools whose manifests are validated and use the same tested adapter, but were not installed here**: Nmap, Wireshark, OWASP ZAP. Their install folders/verification commands are unproven until exercised.
-- **Semgrep**: catalog entry only (container image); cannot be installed yet.
+- **Nikto (WSL) and Semgrep (container)**: complete workflows implemented and tested end to end against a simulated `wsl.exe`/`docker.exe` (install, verify, version tracking, hardened run, cancel, cleanup, every diagnosis). **Not yet run against real WSL/Docker**: this PC has no WSL and its Docker Desktop engine cannot start without it. Do the manual steps in [docs/MANUAL_INTEGRATION_TESTS.md](docs/MANUAL_INTEGRATION_TESTS.md).
+- **Environment detection is real**: the read-only integration tests ran on this PC and correctly reported WSL not installed and Docker installed-but-stopped.
 - Real read-only detection (`winget list`) runs for all winget tools at startup.
 
 ## Tests
 
 ```bash
-npm test                      # 68 frontend tests
-cargo test --manifest-path src-tauri/Cargo.toml     # 110 Rust unit tests (mock installer, real SQLite)
+npm test                      # 94 frontend tests
+cargo test --manifest-path src-tauri/Cargo.toml     # 185 Rust unit tests (simulated winget/wsl/docker, real SQLite)
 npm run test:e2e              # Playwright, demo data
 ```
 
@@ -84,12 +86,17 @@ Opt-in tests against the real winget (never run by default):
 
 ```powershell
 cargo test --manifest-path src-tauri/Cargo.toml --test winget_integration -- --ignored read_only      # read-only
+cargo test --manifest-path src-tauri/Cargo.toml --test platform_integration -- --ignored --nocapture # read-only: WSL, Docker, winget, disk
 $env:VIXALUNE_INTEGRATION_INSTALL = "1"
 cargo test --manifest-path src-tauri/Cargo.toml --test winget_integration -- --ignored --nocapture real_install   # installs then removes Trivy
 ```
 
 ## Known limitations
 
-See "Known limitations" in the [product spec](docs/PRODUCT_SPEC.md). Notably: only the winget adapter exists, tools cannot be launched yet, Nmap/Wireshark/ZAP installs are untested on real hardware, and there is no code signing or bundling.
+See "Known limitations" in the [product spec](docs/PRODUCT_SPEC.md). Notably: WSL and container paths are untested against real runtimes, only container tools can be launched, Nmap/Wireshark/ZAP installs are untested on real hardware, and there is no code signing or bundling.
+
+Windows Smart App Control (when set to enforce) blocks freshly compiled unsigned programs, including cargo build scripts and test binaries. Developing Vixalune then requires turning it off yourself (it cannot be re-enabled without resetting Windows) or building elsewhere; Vixalune never changes this setting.
+
+
 
 

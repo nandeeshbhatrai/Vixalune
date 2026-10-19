@@ -1,10 +1,10 @@
-schema_version = 2
+﻿schema_version = 2
 manifest_version = "1.0.0"
 maintainer = "Vixalune catalog"
 id = "semgrep"
 name = "Semgrep"
 summary = "Fast static analysis for finding bugs and insecure code patterns."
-description = "Semgrep scans source code with pattern-based rules to find bugs and security issues. It runs here as a container image, so Docker is required. Scan only code you own or are authorised to review. Installing it needs the container adapter, which this version of Vixalune does not have yet."
+description = "Semgrep scans source code with pattern-based rules to find bugs and security issues. It runs here as a container image, so Docker is required. Scan only code you own or are authorised to review. It is pulled by digest from Docker Hub and runs without network access, as a non-root user, with a read-only copy of the folder you choose."
 category = "vulnerability"
 tags = ["sast", "static-analysis"]
 license = "LGPL-2.1-only"
@@ -55,3 +55,64 @@ can_uninstall = true
 timeout_secs = 60
 [[verify.checks]]
 kind = "package_installed"
+[[verify.checks]]
+kind = "executable_output"
+runtime = "container"
+executable = "semgrep"
+args = ["--version"]
+
+# Every run uses these limits. Not verified against a live Docker engine in the development environment:
+# if the image needs a writable HOME, /tmp (tmpfs) is provided and HOME points at it.
+[container]
+user = "65532:65532"
+read_only_rootfs = true
+memory_mb = 1024
+cpus_milli = 1000
+pids_limit = 256
+tmpfs = ["/tmp"]
+workdir = "/src"
+env = [{ name = "HOME", value = "/tmp" }]
+mounts = [{ name = "source", container_path = "/src", read_only = true }]
+
+[[launch_profiles]]
+id = "scan-local"
+label = "Scan a folder with your own rules (offline)"
+description = "No network access. Put a rules file inside the folder you choose."
+runtime = "container"
+executable = "semgrep"
+mounts = ["source"]
+args = [
+  { kind = "literal", value = "scan" },
+  { kind = "option", param = "config", flag = "--config" },
+  { kind = "literal", value = "--metrics" },
+  { kind = "literal", value = "off" },
+  { kind = "literal", value = "--disable-version-check" },
+  { kind = "literal", value = "/src" },
+]
+
+[[launch_profiles.parameters]]
+name = "config"
+label = "Rules file inside the folder"
+description = "A path inside the mounted folder, for example /src/.semgrep.yml"
+required = true
+kind = { type = "text", max_len = 200 }
+default = "/src/.semgrep.yml"
+
+[[launch_profiles]]
+id = "scan-registry-rules"
+label = "Scan a folder with the Semgrep registry rules (needs internet)"
+description = "Downloads the public rule set, so network access must be approved."
+runtime = "container"
+executable = "semgrep"
+needs_network = true
+mounts = ["source"]
+args = [
+  { kind = "literal", value = "scan" },
+  { kind = "literal", value = "--config" },
+  { kind = "literal", value = "p/default" },
+  { kind = "literal", value = "--metrics" },
+  { kind = "literal", value = "off" },
+  { kind = "literal", value = "--disable-version-check" },
+  { kind = "literal", value = "/src" },
+]
+

@@ -94,6 +94,7 @@ fn env(winget: bool) -> EnvironmentReport {
         supported_os: true,
         windows_build: Some(26100),
         architecture: "x64".into(),
+        free_disk_bytes: Some(500 << 30),
         components: vec![ComponentStatus {
             component: Prerequisite::Winget,
             state: if winget { ComponentState::Available { version: Some("v1".into()) } } else { ComponentState::Missing },
@@ -103,8 +104,9 @@ fn env(winget: bool) -> EnvironmentReport {
 }
 
 struct FakeDetector(EnvironmentReport);
+#[async_trait]
 impl EnvironmentDetector for FakeDetector {
-    fn detect(&self) -> EnvironmentReport {
+    async fn detect(&self) -> EnvironmentReport {
         self.0.clone()
     }
 }
@@ -318,6 +320,20 @@ async fn missing_prerequisite_fails_before_touching_the_system() {
     assert_eq!(err.code, "prerequisite_missing");
     assert!(err.message.contains("Winget") && err.message.contains("Windows Package Manager"), "{}", err.message);
     assert!(h.exec.calls().is_empty(), "no command may run when a prerequisite is missing");
+}
+
+#[tokio::test]
+async fn insufficient_disk_space_fails_before_touching_the_system_with_a_clear_diagnosis() {
+    let mut low = env(true);
+    low.free_disk_bytes = Some(200 << 20);
+    let h = harness_with(low, &[("nmap.toml", VALID.to_string())]);
+    let job = h.finish(h.engine.install(&nmap_id(), true).await.unwrap()).await;
+    assert_eq!(job.phase, JobPhase::Failed);
+    let err = job.error.unwrap();
+    assert_eq!(err.code, "insufficient_disk_space");
+    assert!(err.message.contains("0.2 GB free"), "{}", err.message);
+    assert!(err.recovery.contains("Free up disk space"));
+    assert!(h.exec.calls().is_empty());
 }
 
 #[tokio::test]
@@ -612,3 +628,5 @@ async fn state_survives_restart_and_interrupted_jobs_are_closed() {
     assert_eq!(rec.state, InstallState::Installed);
     assert_eq!(store.list_jobs(10).unwrap().len(), 2);
 }
+
+

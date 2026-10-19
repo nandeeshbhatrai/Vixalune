@@ -1,0 +1,58 @@
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
+id = "nikto"
+name = "Nikto"
+summary = "Web server vulnerability scanner (runs inside WSL)."
+description = "Nikto checks web servers for dangerous files, outdated software and common misconfigurations. It is installed from your Linux distribution's package repository inside WSL 2. Run it only against servers you are authorised to test, such as a local lab. WSL is not a sandbox: the tool can reach your Windows files and network."
+category = "web_application"
+tags = ["scanner", "web", "linux"]
+license = "GPL-2.0-or-later"
+homepage = "https://cirt.net/Nikto2"
+documentation = "https://github.com/sullo/nikto/wiki"
+source_repository = "https://github.com/sullo/nikto"
+maintenance = "stable"
+platforms = ["wsl"]
+
+[provenance]
+publisher = "Ubuntu / Debian package maintainers"
+basis = "package_repository"
+source_url = "https://packages.ubuntu.com/noble/nikto"
+# Package existence (nikto 1:2.1.5-3.1 in Ubuntu 24.04 'noble') checked on this date from packages.ubuntu.com.
+# Not yet installed on a real distribution by Vixalune; see docs/MANUAL_INTEGRATION_TESTS.md.
+verified_on = "2026-10-19"
+
+[windows]
+min_build = 19045
+architectures = ["x64", "arm64"]
+
+[[prerequisites]]
+kind = "wsl2"
+reason = "Nikto is a Linux tool and runs inside a WSL 2 Ubuntu or Debian distribution."
+requires_admin = true
+requires_restart = true
+
+[[install]]
+method = "wsl_apt"
+packages = ["nikto"]
+
+[integrity]
+level = "package_manager"
+note = "apt verifies package signatures from the distribution's archive. The packaged version (2.1.5) is older than upstream."
+
+[network]
+install = true
+run = true
+
+[privileges]
+install = "none"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
+[verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

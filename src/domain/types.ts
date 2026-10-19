@@ -70,6 +70,23 @@ export interface RunSpec {
   runtime: RuntimeKind;
   executable: string;
   parameters: ParameterDef[];
+  /** Container profiles: names from `container.mounts` the user must supply a folder for. */
+  mounts: string[];
+  needs_network: boolean;
+  ports: number[];
+}
+
+export interface ContainerPolicy {
+  user: string;
+  read_only_rootfs: boolean;
+  memory_mb: number;
+  cpus_milli: number;
+  pids_limit: number;
+  tmpfs: string[];
+  workdir?: string | null;
+  env: { name: string; value: string }[];
+  mounts: { name: string; container_path: string; read_only: boolean }[];
+  ports: number[];
 }
 
 export interface ToolManifest {
@@ -106,6 +123,7 @@ export interface ToolManifest {
   privileges: { install: ElevationNeed; run: ElevationNeed; may_require_restart: boolean };
   lifecycle: { can_update: boolean; can_uninstall: boolean };
   verify: { timeout_secs?: number | null; checks: VerifyCheck[] };
+  container?: ContainerPolicy | null;
   launch_profiles: RunSpec[];
 }
 export type TrustLevel = "bundled" | "remote_unsigned";
@@ -155,7 +173,7 @@ export interface InstalledTool {
   last_verification?: VerificationResult | null;
 }
 
-export type JobKind = "install" | "update" | "uninstall" | "verify" | "run";
+export type JobKind = "install" | "update" | "uninstall" | "verify" | "run" | "setup";
 export type JobPhase =
   | "queued"
   | "checking_prerequisites"
@@ -163,6 +181,7 @@ export type JobPhase =
   | "installing"
   | "verifying"
   | "uninstalling"
+  | "running"
   | "cancelling"
   | "rolling_back"
   | "succeeded"
@@ -222,6 +241,7 @@ export interface InstallPlan {
   approx_disk_mb?: number | null;
   license: string;
   integrity: IntegrityLevel;
+  notes: string[];
   unsupported_reason?: string | null;
 }
 export interface LabDefinition {
@@ -252,6 +272,7 @@ export interface EnvironmentReport {
   supported_os: boolean;
   windows_build?: number | null;
   architecture: string;
+  free_disk_bytes?: number | null;
   components: ComponentStatus[];
   issues: SetupIssue[];
 }
@@ -280,5 +301,109 @@ export interface AppErrorDto {
   code: string;
   message: string;
   recovery: string;
+}
+
+
+
+// ---------------------------------------------------------------- platform report (Phase 4)
+
+export type Readiness = "ready" | "needs_setup" | "blocked" | "unknown";
+export type FeatureState = "available" | "unavailable" | "unknown";
+export type DistroState = "running" | "stopped" | "installing" | "unknown";
+
+export interface WslDistro {
+  name: string;
+  state: DistroState;
+  version?: number | null;
+  is_default: boolean;
+  internal: boolean;
+  os_id?: string | null;
+}
+
+export type DaemonState =
+  | { state: "running"; server_version?: string | null; os_type?: string | null; architecture?: string | null; rootless?: boolean | null }
+  | { state: "stopped"; reason: string }
+  | { state: "unknown"; reason: string };
+
+export interface CapabilityReadiness {
+  state: Readiness;
+  summary: string;
+  missing: string[];
+  blockers: string[];
+  notes: string[];
+}
+
+export type SetupActionId =
+  | "install_wsl"
+  | "install_distro"
+  | "convert_distro_to_wsl2"
+  | "enable_virtualization"
+  | "install_docker_desktop"
+  | "start_docker_desktop"
+  | "free_disk_space"
+  | "install_winget";
+
+export interface SetupAction {
+  id: SetupActionId;
+  title: string;
+  why: string;
+  kind: "automatic" | "manual";
+  requires_admin: boolean;
+  requires_restart: boolean;
+  command_preview?: string | null;
+  official_link?: string | null;
+  instructions: string[];
+  depends_on: SetupActionId[];
+}
+
+export interface PlatformReport {
+  detected_at: string;
+  windows: { build?: number | null; display_version?: string | null; edition?: string | null; architecture: string };
+  virtualization: { firmware_enabled?: boolean | null; hypervisor_present?: boolean | null };
+  features: { id: string; label: string; state: FeatureState; basis: string }[];
+  wsl: { installed?: boolean | null; detail?: string | null; wsl_version?: string | null; default_version?: number | null; distros: WslDistro[] };
+  containers: {
+    runtime?: {
+      name: string;
+      cli_path?: string | null;
+      cli_version?: string | null;
+      context?: string | null;
+      context_local?: boolean | null;
+      daemon: DaemonState;
+    } | null;
+  };
+  package_managers: { name: string; scope: string; version?: string | null }[];
+  disk: { path: string; free_bytes?: number | null; total_bytes?: number | null };
+  system: { pending_restart?: boolean | null; proxy?: string | null; policy_keys: string[]; is_elevated?: boolean | null };
+  configured_distro?: string | null;
+  readiness: { windows_tools: CapabilityReadiness; linux_tools_wsl: CapabilityReadiness; containers: CapabilityReadiness };
+  setup_actions: SetupAction[];
+}
+
+// ---------------------------------------------------------------- container launch
+
+export interface RunApprovals {
+  network: boolean;
+  /** mount name -> host folder */
+  mounts: Record<string, string>;
+  /** container port -> host port */
+  ports: Record<number, number>;
+}
+
+export interface RunSummary {
+  image: string;
+  command: string;
+  user: string;
+  network: "none" | "bridge";
+  mounts: { host: string; container: string; read_only: boolean }[];
+  ports: [number, number][];
+  limits: string;
+  read_only_rootfs: boolean;
+  warnings: string[];
+}
+
+export interface RunPreview {
+  command: { runtime: RuntimeKind; program: string; args: string[]; display: string };
+  container?: RunSummary | null;
 }
 

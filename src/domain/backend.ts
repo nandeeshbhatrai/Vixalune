@@ -1,14 +1,18 @@
-import type {
+﻿import type {
   ActivityEvent,
   AppInfo,
   Capabilities,
   CatalogEntry,
-  EnvironmentReport,
   InstalledTool,
   InstallPlan,
   Job,
   LabDefinition,
   LinkKind,
+  ParamValue,
+  PlatformReport,
+  RunApprovals,
+  RunPreview,
+  SetupActionId,
   ToolQuery,
   ToolStateEntry,
 } from "./types";
@@ -25,7 +29,8 @@ export interface Backend {
   // Read models
   getAppInfo(): Promise<AppInfo>;
   getCapabilities(): Promise<Capabilities>;
-  detectEnvironment(): Promise<EnvironmentReport>;
+  /** Facts, per-capability readiness and proposed setup steps for this computer. */
+  getPlatformReport(): Promise<PlatformReport>;
   listTools(query?: ToolQuery): Promise<CatalogEntry[]>;
   getTool(id: string): Promise<CatalogEntry>;
   listToolStates(): Promise<ToolStateEntry[]>;
@@ -43,10 +48,22 @@ export interface Backend {
   installTool(id: string, allowElevation: boolean): Promise<string>;
   uninstallTool(id: string, allowElevation: boolean): Promise<string>;
   verifyTool(id: string): Promise<string>;
-  launchTool(id: string): Promise<string>;
+  /** Describe exactly what a launch would do (container image, mounts, network, ports) without starting it. */
+  previewLaunch(id: string, profile: string, values: Record<string, ParamValue>, approvals: RunApprovals): Promise<RunPreview>;
+  /** Start a launch profile as a job. Container runs start only with exactly these approvals. */
+  launchTool(id: string, profile: string, values: Record<string, ParamValue>, approvals: RunApprovals): Promise<string>;
+  /** Run one automatic setup step. `confirmed` must be true because it changes the computer. */
+  runSetupAction(id: SetupActionId, confirmed: boolean): Promise<string>;
+  /** Schedule a Windows restart (cancellable delay). Never happens without `confirmed`. */
+  requestRestart(confirmed: boolean, delaySecs: number): Promise<void>;
+  cancelRestart(): Promise<void>;
+  /** Open the official guide for a setup step in the default browser (the backend owns the URL). */
+  openSetupLink(id: SetupActionId): Promise<void>;
   /** Grant the consent a job is waiting for. */
   approveJob(jobId: string): Promise<void>;
   cancelJob(jobId: string): Promise<void>;
   /** Opens a catalog link in the default browser. The backend resolves the URL. */
   openLink(toolId: string, kind: LinkKind): Promise<void>;
 }
+
+

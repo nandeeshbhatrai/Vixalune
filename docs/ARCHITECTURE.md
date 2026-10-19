@@ -90,6 +90,67 @@ Absolute program path only (refuses relative); `args` array, `stdin` closed, **e
 | `WingetAdapter` | Implemented and tested (mock executor + one real run) |
 | WSL apt, container image, verified archive | Interfaces and manifest validation exist; **no adapter** — installs are refused with a clear message until each is implemented and tested |
 
+## 2c. Platform integration (Phase 4)
+
+```
+SystemPlatformDetector ──(wsl.exe, docker.exe, winget.exe via CommandExecutor; registry/Win32 via HostFacts)──> PlatformReport
+        │                    facts → readiness (pure, domain/platform.rs) → proposed SetupActions
+        └─ also implements EnvironmentDetector (components used by dependency resolution)
+
+InstallEngine ── adapters: WingetAdapter | WslAptAdapter | ContainerAdapter     (InstallerAdapter port)
+ContainerToolRunner ── hardened `docker run` from manifest policy + user approvals  (ToolRunner port)
+SetupEngine ── the only code that changes the system: WSL install (UAC), distro install, scheduled restart  (SetupManager port)
+```
+
+- **Detection vs readiness vs permission.** `PlatformReport` holds *facts* (unknown stays unknown); `readiness`
+  (`ready` / `needs_setup` / `blocked` / `unknown`) is derived from them per capability (Windows tools, Linux tools in
+  WSL, containers); `setup_actions` are *proposals* (`automatic` or `manual`). Running one needs `confirmed = true`
+  and re-checks that it is still needed. Detection never elevates, never starts a stopped distribution, and reports
+  Windows optional-feature state as *unknown* (reading it needs administrator rights).
+- **Component view.** The engine's prerequisite check uses `PlatformReport::to_environment()`: `wsl2` is available only
+  when a WSL 2 distribution is ready, `docker` only when a local Linux engine answers. A Docker CLI without a running
+  engine never counts.
+- **WSL adapter.** `wsl.exe --distribution <name> --user root --cd /tmp --exec <absolute program> <args…>`: configured or
+  default WSL 2 distribution, never Docker's utility distributions, no shell, validated package names, `apt-get`
+  non-interactive via `/usr/bin/env`. Failures are classified by layer (Windows/WSL vs the package manager vs network/disk).
+  Cleanup = `apt-get remove` of the named packages only.
+- **Container adapter.** Local Docker CLI only (remote contexts, `DOCKER_HOST`, Windows containers refused). Registry
+  allow-list (default `docker.io`, `ghcr.io`, `quay.io`, `mcr.microsoft.com`, configurable in `config.toml`), **digest-only**
+  references, `--pull never` at run time. Verification runs the tool in the same hardened container. Cleanup removes
+  labelled containers and the image.
+- **Hardened run** (`domain/container.rs`, enforced twice: when building and by `assert_hardened` on the final argv):
+  numeric non-root user, `--cap-drop ALL`, `no-new-privileges`, read-only root, tmpfs for `/tmp`, memory/CPU/pids limits,
+  network `none` unless approved, only declared bind mounts of validated, canonicalised folders (read-only by default),
+  ports published on `127.0.0.1` only, never `--privileged`, host namespaces, devices, `--volumes-from`, the Docker
+  socket or named pipe.
+- **Approvals.** Network, host folders and host ports are supplied by the user per run in the Launch dialog, reviewed
+  as an exact summary, and echoed back to the backend, which validates them again.
+- **Failure diagnosis** (`domain/failure.rs`): `wsl_unavailable`, `virtualization_disabled`, `distribution_missing`,
+  `container_runtime_stopped`, `insufficient_disk_space`, `package_download_failed`, `proxy_restricted`,
+  `unsupported_architecture`, `missing_permissions`, `policy_restricted`, `remote_container_context`,
+  `unsupported_container_os`, `package_manager_error`; each with recovery text and (where useful) an official link.
+  Unrecognised output stays a plain command failure with the raw tail; it is never turned into success.
+- **No silent fallback.** If WSL, the engine or a prerequisite is unavailable the job fails with a diagnosis; Vixalune
+  never switches to another runtime (for example running a Linux tool natively or a container tool in WSL).
+- **Jobs.** New phase `running` (a launched tool) and job kind `setup`. `RoutedJobs` sends cancellation to the owner
+  (install engine or container runner). Setup jobs cannot be cancelled once the OS prompt is up.
+
+### Unsupported or unverified combinations (explicit)
+
+| Combination | Status |
+|---|---|
+| Install: winget | Works; verified for real (Trivy) |
+| Install: WSL apt (Debian/Ubuntu family) | Implemented, **mock-tested only** (no WSL on the dev PC) |
+| Install: container image (local Docker) | Implemented, **mock-tested only** (Docker engine cannot start on the dev PC) |
+| Install: verified archive download | **Not implemented** (refused) |
+| Launch: container profiles | Implemented, mock-tested |
+| Launch: Windows or WSL profiles | **Not implemented** |
+| WSL distributions without apt (Fedora, Arch, Alpine, openSUSE…) | Refused with a message; WSL 1 distributions refused |
+| Podman, Rancher Desktop, remote engines, Windows containers, Hyper-V isolation | **Not supported** |
+| arm64 Windows | Detected and allowed by manifests; **untested** |
+| Non-English Windows | Detection works from exit codes and table shape; some diagnoses rely on English message text and degrade to a generic command failure |
+| Windows older than build 19045 | Blocked |
+
 ## 3. Interfaces (src-tauri/src/ports.rs)
 
 | Interface | Responsibility | Phase 1 implementation |
@@ -172,4 +233,5 @@ Verifying ─VerifyFailed→ VerificationFailed (distinct from Failed; retryable
 5. **shadcn/ui primitives copied in by hand** (Button, Card, Badge) using the same Radix + cva pattern, because the shadcn CLI needs network scaffolding; `components.json` is present so `npx shadcn add` works later.
 6. **TOML for manifests** — comment-friendly for contributors, no code execution; JSON stays the IPC format.
 7. **Minimal Tauri capabilities** — `core:default` only; no shell/fs/opener plugins exposed to the webview.
+
 

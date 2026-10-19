@@ -1,4 +1,4 @@
-import { Briefcase } from "lucide-react";
+﻿import { Briefcase } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AsyncView } from "@/components/AsyncView";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -161,7 +161,7 @@ export function Jobs() {
                             <Button variant="outline" size="sm" onClick={() => setViewingId(j.id)} aria-label={`View output for ${name} ${JOB_KIND_LABEL[j.kind]}`}>
                               View output
                             </Button>
-                            {active && j.phase !== "cancelling" && j.phase !== "rolling_back" ? (
+                            {active && j.kind !== "setup" && j.phase !== "cancelling" && j.phase !== "rolling_back" ? (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -206,3 +206,4 @@ export function Jobs() {
     </div>
   );
 }
+

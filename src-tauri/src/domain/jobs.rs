@@ -1,4 +1,4 @@
-//! Jobs, installation records and UI read models. Everything here describes *observed* state;
+﻿//! Jobs, installation records and UI read models. Everything here describes *observed* state;
 //! nothing is fabricated by the core.
 
 use super::errors::{AppError, AppResult};
@@ -105,6 +105,8 @@ pub enum JobKind {
     Uninstall,
     Verify,
     Run,
+    /// A system setup step (for example installing WSL), not a tool operation.
+    Setup,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -116,6 +118,8 @@ pub enum JobPhase {
     Installing,
     Verifying,
     Uninstalling,
+    /// A tool is running (launched by the user).
+    Running,
     Cancelling,
     RollingBack,
     Succeeded,
@@ -124,13 +128,14 @@ pub enum JobPhase {
 }
 
 impl JobPhase {
-    pub const ACTIVE: [JobPhase; 8] = [
+    pub const ACTIVE: [JobPhase; 9] = [
         Self::Queued,
         Self::CheckingPrerequisites,
         Self::AwaitingConsent,
         Self::Installing,
         Self::Verifying,
         Self::Uninstalling,
+        Self::Running,
         Self::Cancelling,
         Self::RollingBack,
     ];
@@ -152,6 +157,7 @@ impl JobPhase {
             Self::Installing => "installing",
             Self::Verifying => "verifying",
             Self::Uninstalling => "uninstalling",
+            Self::Running => "running",
             Self::Cancelling => "cancelling",
             Self::RollingBack => "rolling_back",
             Self::Succeeded => "succeeded",
@@ -177,6 +183,8 @@ pub enum JobEvent {
     BeginInstall,
     BeginUninstall,
     BeginVerify,
+    BeginRun,
+    RunDone,
     InstallDone,
     VerifyPassed,
     VerifyFailed,
@@ -198,15 +206,17 @@ impl JobPhase {
             (P::CheckingPrerequisites | P::AwaitingConsent, E::BeginInstall) => P::Installing,
             (P::CheckingPrerequisites | P::AwaitingConsent, E::BeginUninstall) => P::Uninstalling,
             (P::CheckingPrerequisites, E::BeginVerify) => P::Verifying,
+            (P::CheckingPrerequisites | P::AwaitingConsent, E::BeginRun) => P::Running,
+            (P::Running, E::RunDone) => P::Succeeded,
             (P::Installing, E::InstallDone) => P::Verifying,
             (P::Uninstalling, E::UninstallDone) => P::Succeeded,
             (P::Verifying, E::VerifyPassed) => P::Succeeded,
             (P::Verifying, E::VerifyFailed) => P::Failed,
             (P::Installing | P::Cancelling, E::BeginRollback) => P::RollingBack,
-            (P::Queued | P::CheckingPrerequisites | P::AwaitingConsent | P::Installing | P::Verifying | P::Uninstalling | P::RollingBack, E::Fail) => {
+            (P::Queued | P::CheckingPrerequisites | P::AwaitingConsent | P::Installing | P::Verifying | P::Uninstalling | P::Running | P::RollingBack, E::Fail) => {
                 P::Failed
             }
-            (P::Queued | P::CheckingPrerequisites | P::AwaitingConsent | P::Installing | P::Verifying | P::Uninstalling, E::RequestCancel) => {
+            (P::Queued | P::CheckingPrerequisites | P::AwaitingConsent | P::Installing | P::Verifying | P::Uninstalling | P::Running, E::RequestCancel) => {
                 P::Cancelling
             }
             (P::Cancelling | P::RollingBack, E::CancelDone) => P::Cancelled,
@@ -302,6 +312,14 @@ mod tests {
     }
 
     #[test]
+    fn run_path_and_cancel() {
+        assert_eq!(run(P::Queued, &[E::StartChecks, E::BeginRun, E::RunDone]).unwrap(), P::Succeeded);
+        assert_eq!(run(P::Queued, &[E::StartChecks, E::BeginRun, E::RequestCancel, E::CancelDone]).unwrap(), P::Cancelled);
+        assert_eq!(run(P::Queued, &[E::StartChecks, E::BeginRun, E::Fail]).unwrap(), P::Failed);
+        assert!(P::Running.apply(E::VerifyPassed).is_err());
+    }
+
+    #[test]
     fn terminal_phases_accept_nothing() {
         for p in [P::Succeeded, P::Failed, P::Cancelled] {
             assert!(p.is_terminal());
@@ -327,3 +345,4 @@ mod tests {
         assert!(P::parse("bogus").is_err());
     }
 }
+

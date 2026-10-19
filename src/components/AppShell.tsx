@@ -1,5 +1,6 @@
-import { Activity, BookOpen, Briefcase, LayoutDashboard, ListChecks, Settings, Wrench, type LucideIcon } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+﻿import { Activity, BookOpen, Briefcase, LayoutDashboard, ListChecks, Settings, ShieldCheck, Wrench, type LucideIcon } from "lucide-react";
+import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
+import { setupSeen } from "@/pages/SetupWizard";
 import { useBackend } from "@/infra/backendContext";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { cn } from "@/lib/utils";
@@ -11,11 +12,15 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/jobs", label: "Running Jobs", icon: Briefcase },
   { to: "/labs", label: "Learning Labs", icon: BookOpen },
   { to: "/activity", label: "Activity", icon: Activity },
+  { to: "/setup", label: "Setup", icon: ShieldCheck },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppShell() {
+export function AppShell({ firstRunRedirect = false }: { firstRunRedirect?: boolean }) {
   const backend = useBackend();
+  const location = useLocation();
+  // First launch: open the setup wizard once. It never changes anything by itself.
+  if (firstRunRedirect && location.pathname === "/" && !setupSeen()) return <Navigate to="/setup" replace />;
   return (
     <WorkspaceProvider>
       <a
@@ -62,3 +67,4 @@ export function AppShell() {
     </WorkspaceProvider>
   );
 }
+

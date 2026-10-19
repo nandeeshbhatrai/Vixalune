@@ -19,10 +19,10 @@ function withStates(states: Record<string, InstallState | null>, overrides: Part
 }
 
 describe("navigation", () => {
-  it("shows all seven sidebar destinations", async () => {
+  it("shows all eight sidebar destinations", async () => {
     renderApp("/");
     const nav = within(screen.getByRole("navigation", { name: "Main" }));
-    for (const name of ["Dashboard", "Tool Catalog", "Installed Tools", "Running Jobs", "Learning Labs", "Activity", "Settings"]) {
+    for (const name of ["Dashboard", "Tool Catalog", "Installed Tools", "Running Jobs", "Learning Labs", "Activity", "Setup", "Settings"]) {
       expect(nav.getByRole("link", { name })).toBeInTheDocument();
     }
   });
@@ -54,8 +54,11 @@ describe("dashboard", () => {
   it("shows the environment checklist with recovery steps and recommended tools", async () => {
     renderApp("/");
     const list = await screen.findByRole("list", { name: "Environment checklist" });
-    expect(within(list).getByText("WSL 2")).toBeInTheDocument();
-    expect(screen.getByText(/wsl --install/)).toBeInTheDocument();
+    expect(within(list).getByText("Windows tools (winget)")).toBeInTheDocument();
+    expect(within(list).getByText("Linux tools (WSL 2)")).toBeInTheDocument();
+    expect(within(list).getAllByText("Needs setup").length).toBe(2);
+    expect(within(list).getByText("WSL is not installed")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Setup" })).toHaveAttribute("href", "/setup");
     expect(screen.getByRole("link", { name: "Browse tools" })).toHaveAttribute("href", "/catalog");
     expect(await screen.findByRole("link", { name: /Wireshark/ })).toBeInTheDocument();
   });
@@ -67,7 +70,7 @@ describe("dashboard", () => {
   });
 
   it("shows a recoverable error when environment detection fails", async () => {
-    renderApp("/", readOnlyBackend({ detectEnvironment: () => Promise.reject(err) }));
+    renderApp("/", readOnlyBackend({ getPlatformReport: () => Promise.reject(err) }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("probe failed");
     expect(alert).toHaveTextContent("Reinstall winget.");
@@ -83,17 +86,17 @@ describe("dashboard", () => {
 describe("catalog", () => {
   it("lists the seeded tools with status badges", async () => {
     renderApp("/catalog");
-    for (const n of ["Nmap", "OWASP ZAP", "Wireshark", "Semgrep", "Trivy"]) {
+    for (const n of ["Nmap", "OWASP ZAP", "Wireshark", "Semgrep", "Trivy", "Nikto"]) {
       expect(await screen.findByRole("heading", { name: n, level: 3 })).toBeInTheDocument();
     }
-    expect(screen.getByText("5 of 5 tools")).toBeInTheDocument();
+    expect(screen.getByText("6 of 6 tools")).toBeInTheDocument();
   });
 
   it("searches name and description", async () => {
     renderApp("/catalog");
     await screen.findByRole("heading", { name: "Nmap", level: 3 });
     await userEvent.type(screen.getByLabelText("Search tools"), "proxy");
-    await waitFor(() => expect(screen.getByText("1 of 5 tools")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("1 of 6 tools")).toBeInTheDocument());
     expect(screen.getByRole("heading", { name: "OWASP ZAP", level: 3 })).toBeInTheDocument();
   });
 
@@ -101,15 +104,15 @@ describe("catalog", () => {
     renderApp("/catalog");
     await screen.findByRole("heading", { name: "Nmap", level: 3 });
     await userEvent.selectOptions(screen.getByLabelText("Category"), "vulnerability");
-    expect(screen.getByText("2 of 5 tools")).toBeInTheDocument();
+    expect(screen.getByText("2 of 6 tools")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Platform"), "container");
-    expect(screen.getByText("1 of 5 tools")).toBeInTheDocument();
+    expect(screen.getByText("1 of 6 tools")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Execution method"), "winget");
     expect(await screen.findByText("No tools match your filters")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[0]!);
-    expect(await screen.findByText("5 of 5 tools")).toBeInTheDocument();
+    expect(await screen.findByText("6 of 6 tools")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Status"), "verification_failed");
-    expect(screen.getByText("1 of 5 tools")).toBeInTheDocument();
+    expect(screen.getByText("1 of 6 tools")).toBeInTheDocument();
   });
 
   it("sorts by name descending", async () => {
@@ -236,7 +239,9 @@ describe("tool details and actions", () => {
 
 describe("install plan", () => {
   it("blocks the install and explains why when the tool cannot be installed here", async () => {
-    renderApp("/catalog/semgrep", withStates({ semgrep: "not_installed" }));
+    // A build without the container adapter: Semgrep cannot be installed, and the page says why.
+    const winOnly = async () => ({ ...(await createDemoBackend().getCapabilities()), install_methods: ["winget" as const] });
+    renderApp("/catalog/semgrep", withStates({ semgrep: "not_installed" }, { getCapabilities: winOnly }));
     // Semgrep needs the container installer: the page already says so and Install stays disabled.
     expect(await screen.findByText(/does not include yet/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
@@ -376,6 +381,10 @@ describe("labs and activity", () => {
     expect(await screen.findByText("No activity yet")).toBeInTheDocument();
   });
 });
+
+
+
+
 
 
 

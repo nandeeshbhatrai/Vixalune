@@ -7,6 +7,7 @@
 //! A job only reaches `succeeded` when the manifest's verification procedure passes.
 
 use crate::domain::activity::{ActivityEvent, ActivityKind};
+use crate::domain::failure::{FailureKind, FailureLayer, PlatformFailure};
 use crate::domain::install_state::InstallState;
 use crate::domain::jobs::{
     InstallationRecord, InstalledTool, Job, JobError, JobEvent, JobKind, JobPhase, ToolStateEntry, VerificationLevel, VerificationOutcome,
@@ -36,6 +37,21 @@ pub struct EngineDeps {
     pub adapters: Vec<Arc<dyn InstallerAdapter>>,
     pub store: Arc<dyn JobStore>,
     pub activity: Arc<dyn ActivityLogger>,
+}
+
+const GIB: u64 = 1024 * 1024 * 1024;
+
+/// Free space required before a job starts: the manifest's own estimate with headroom, or a
+/// conservative default per install method.
+pub fn required_disk_bytes(m: &ToolManifest, spec: &InstallSpec) -> u64 {
+    match m.storage.approx_disk_mb {
+        Some(mb) => u64::from(mb) * 3 / 2 * 1024 * 1024 + GIB / 2,
+        None => match spec {
+            InstallSpec::Winget { .. } | InstallSpec::DownloadArchive { .. } => GIB,
+            InstallSpec::WslApt { .. } => 2 * GIB,
+            InstallSpec::ContainerImage { .. } => 5 * GIB,
+        },
+    }
 }
 
 fn now() -> String {
@@ -314,7 +330,7 @@ impl Run {
             JobKind::Install | JobKind::Update => self.install_flow().await,
             JobKind::Uninstall => self.uninstall_flow().await,
             JobKind::Verify => self.verify_flow().await,
-            JobKind::Run => Err(AppError::NotImplemented("run jobs")),
+            JobKind::Run | JobKind::Setup => Err(AppError::NotImplemented("this job kind is handled by its own manager")),
         }
     }
 
@@ -322,8 +338,7 @@ impl Run {
 
     async fn prepare(&self, with_preflight: bool) -> AppResult<Prepared> {
         self.check_cancelled()?;
-        let detector = self.inner.deps.detector.clone();
-        let env = tokio::task::spawn_blocking(move || detector.detect()).await.map_err(|e| AppError::Environment(e.to_string()))?;
+        let env = self.inner.deps.detector.detect().await;
         let inner = self.inner.clone();
         let plan = self.inner.deps.resolver.resolve(&self.manifest, &env, &move |s| inner.adapter_for(s).is_some())?;
         if let Some(reason) = &plan.unsupported_reason {
@@ -338,6 +353,16 @@ impl Run {
                 .collect::<Vec<_>>()
                 .join(" | ");
             return Err(AppError::PrerequisiteMissing(detail));
+        }
+        if let Some(free) = env.free_disk_bytes {
+            let need = required_disk_bytes(&self.manifest, &plan.method);
+            if free < need {
+                return Err(AppError::Platform(PlatformFailure::new(
+                    FailureKind::InsufficientDisk,
+                    FailureLayer::Windows,
+                    format!("only {:.1} GB free; about {:.1} GB is needed", free as f64 / GIB as f64, need as f64 / GIB as f64),
+                )));
+            }
         }
         for dep in &plan.dependencies {
             let ok = matches!(self.store().get_installation(dep)?, Some(r) if r.state == InstallState::Installed);
@@ -672,6 +697,8 @@ fn phase_to_state(phase: JobPhase, kind: JobKind) -> InstallState {
         JobPhase::Installing => InstallState::Installing,
         JobPhase::Verifying => InstallState::Verifying,
         JobPhase::Uninstalling => InstallState::Uninstalling,
+        // A running tool is installed; the active job stops other operations on it.
+        JobPhase::Running => InstallState::Installed,
         JobPhase::Cancelling | JobPhase::RollingBack => InstallState::Cancelling,
         JobPhase::Succeeded | JobPhase::Failed | JobPhase::Cancelled => {
             let _ = kind;
@@ -783,8 +810,7 @@ impl InstallationManager for InstallEngine {
 
     async fn plan(&self, id: &ToolId) -> AppResult<InstallPlan> {
         let manifest = self.inner.deps.registry.get(id)?.manifest;
-        let detector = self.inner.deps.detector.clone();
-        let env = tokio::task::spawn_blocking(move || detector.detect()).await.map_err(|e| AppError::Environment(e.to_string()))?;
+        let env = self.inner.deps.detector.detect().await;
         let inner = self.inner.clone();
         self.inner.deps.resolver.resolve(&manifest, &env, &move |s| inner.adapter_for(s).is_some())
     }
@@ -860,3 +886,32 @@ impl LineSink for NullSink {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod workflow_tests;
+
+
+
+
+/// Job registry that routes cancellation to whichever manager owns the job (installs/verifies,
+/// container runs). Listing and output come from the shared store.
+pub struct RoutedJobs {
+    pub engine: InstallEngine,
+    pub runner: Arc<crate::adapters::container_runner::ContainerToolRunner>,
+}
+
+#[async_trait]
+impl JobRegistry for RoutedJobs {
+    fn list(&self) -> AppResult<Vec<Job>> {
+        JobRegistry::list(&self.engine)
+    }
+    fn output(&self, id: OperationId) -> AppResult<Vec<String>> {
+        JobRegistry::output(&self.engine, id)
+    }
+    async fn cancel(&self, id: OperationId) -> AppResult<()> {
+        match InstallationManager::cancel(&self.engine, id).await {
+            Err(AppError::NotFound(_)) => self.runner.cancel(id).await,
+            other => other,
+        }
+    }
+}
+

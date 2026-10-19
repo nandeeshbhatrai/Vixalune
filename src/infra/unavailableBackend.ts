@@ -1,4 +1,4 @@
-import type { Backend } from "@/domain/backend";
+﻿import type { Backend } from "@/domain/backend";
 import type { AppErrorDto } from "@/domain/types";
 
 const error: AppErrorDto = {
@@ -15,7 +15,7 @@ export const unavailableBackend: Backend = {
   isDemo: false,
   getAppInfo: fail,
   getCapabilities: fail,
-  detectEnvironment: fail,
+  getPlatformReport: fail,
   listTools: fail,
   getTool: fail,
   listToolStates: fail,
@@ -29,8 +29,15 @@ export const unavailableBackend: Backend = {
   installTool: fail,
   uninstallTool: fail,
   verifyTool: fail,
+  previewLaunch: fail,
   launchTool: fail,
+  runSetupAction: fail,
+  requestRestart: fail,
+  cancelRestart: fail,
+  openSetupLink: fail,
   approveJob: fail,
   cancelJob: fail,
   openLink: fail,
 };
+
+

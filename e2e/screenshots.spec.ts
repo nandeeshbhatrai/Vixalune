@@ -1,10 +1,15 @@
-import { test } from "@playwright/test";
+﻿import { test } from "@playwright/test";
 
 // Captures docs/screenshots/*.png from the labelled demo data. Opt in with: SCREENSHOTS=1 npm run test:e2e
 test.skip(!process.env.SCREENSHOTS, "set SCREENSHOTS=1 to capture screenshots");
 test.use({ viewport: { width: 1366, height: 768 }, colorScheme: "dark" });
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("vixalune.setupSeen", "1"));
+});
+
 const pages: [string, string][] = [
+  ["setup", "/#/setup"],
   ["dashboard", "/#/"],
   ["catalog", "/#/catalog"],
   ["tool-detail", "/#/catalog/semgrep"],
@@ -36,3 +41,4 @@ test("screenshot light and dialog", async ({ page }) => {
   await page.getByRole("dialog").waitFor();
   await page.screenshot({ path: "docs/screenshots/install-confirm.png" });
 });
+

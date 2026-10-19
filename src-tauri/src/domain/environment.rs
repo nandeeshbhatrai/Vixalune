@@ -1,4 +1,4 @@
-//! Environment readiness model, produced by an `EnvironmentDetector`.
+﻿//! Environment readiness model, produced by an `EnvironmentDetector`.
 
 use super::manifest::Prerequisite;
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,9 @@ pub struct EnvironmentReport {
     pub windows_build: Option<u32>,
     /// `x64` or `arm64` of the running system.
     pub architecture: String,
+    /// Free bytes on the volume that holds tools and downloads, when known.
+    #[serde(default)]
+    pub free_disk_bytes: Option<u64>,
     pub components: Vec<ComponentStatus>,
     pub issues: Vec<SetupIssue>,
 }
@@ -121,3 +124,4 @@ mod tests {
         assert_eq!(v["state"], "missing");
     }
 }
+

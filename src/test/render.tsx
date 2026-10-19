@@ -32,13 +32,14 @@ export function readOnlyBackend(overrides: Partial<Backend> = {}): Backend {
   };
 }
 
-export function renderApp(path: string, backend: Backend = createDemoBackend()) {
+export function renderApp(path: string, backend: Backend = createDemoBackend(), opts: { firstRunRedirect?: boolean } = {}) {
   return render(
     <BackendProvider backend={backend}>
       <MemoryRouter initialEntries={[path]}>
-        <AppRoutes />
+        <AppRoutes firstRunRedirect={opts.firstRunRedirect ?? false} />
       </MemoryRouter>
     </BackendProvider>,
   );
 }
+
 

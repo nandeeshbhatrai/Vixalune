@@ -30,6 +30,9 @@ tokio = { version = "1", features = ["process", "io-util", "time", "sync", "rt",
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_Security", "Win32_UI_Shell", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+

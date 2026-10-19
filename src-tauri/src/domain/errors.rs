@@ -1,6 +1,7 @@
-//! Application error type. Every variant carries a stable `code` and a human-readable
+﻿//! Application error type. Every variant carries a stable `code` and a human-readable
 //! recovery instruction so the UI can show actionable errors (requirement 9).
 
+use super::failure::PlatformFailure;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use thiserror::Error;
@@ -37,6 +38,8 @@ pub enum AppError {
     VerificationFailed(String),
     #[error("timed out: {0}")]
     TimedOut(String),
+    #[error("{}: {}", .0.title(), .0.detail)]
+    Platform(PlatformFailure),
     #[error("'{0}' is not implemented in this build yet")]
     NotImplemented(&'static str),
 }
@@ -60,6 +63,7 @@ impl AppError {
             Self::CommandFailed { .. } => "command_failed",
             Self::VerificationFailed(_) => "verification_failed",
             Self::TimedOut(_) => "timed_out",
+            Self::Platform(f) => f.code(),
         }
     }
 
@@ -90,6 +94,7 @@ impl AppError {
                 "The tool did not pass its check. Use Verify to re-check, Retry to reinstall, or Uninstall to remove it."
             }
             Self::TimedOut(_) => "Check your network connection and available disk space, then retry.",
+            Self::Platform(f) => f.recovery(),
         }
     }
 }
@@ -130,3 +135,4 @@ mod tests {
         assert!(!v["recovery"].as_str().unwrap().is_empty());
     }
 }
+

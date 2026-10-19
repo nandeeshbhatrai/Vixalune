@@ -95,7 +95,7 @@ mod tests {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("manifests");
         let reg = ManifestRegistry::load_dir(&dir, TrustLevel::Bundled).unwrap();
         assert!(reg.rejected.is_empty(), "{:?}", reg.rejected);
-        assert_eq!(reg.list(&ToolQuery::default()).len(), 5);
+        assert_eq!(reg.list(&ToolQuery::default()).len(), 6);
     }
 
     #[test]
@@ -118,3 +118,4 @@ mod tests {
         assert!(reg.get(&ToolId::new("missing").unwrap()).is_err());
     }
 }
+

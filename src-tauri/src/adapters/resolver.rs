@@ -45,6 +45,30 @@ fn status_for(manifest: &ToolManifest, env: &EnvironmentReport, spec: &InstallSp
     specs.into_iter().map(|s| PrerequisiteStatus { satisfied: satisfied(env, s.kind), spec: s }).collect()
 }
 
+/// Isolation and placement warnings that depend on where the tool will live.
+fn notes_for(manifest: &ToolManifest, spec: &InstallSpec) -> Vec<String> {
+    match spec {
+        InstallSpec::WslApt { .. } => vec![
+            "This tool is installed inside your WSL 2 Linux distribution, not on Windows.".into(),
+            "WSL is not a sandbox: Linux programs can read and change your Windows files (under /mnt/c) and use your network.".into(),
+            "The distribution may be started to install it. Packages are installed as root inside that distribution only.".into(),
+        ],
+        InstallSpec::ContainerImage { .. } => {
+            let mut n = vec![
+                "The image is downloaded by its digest from an approved registry. Vixalune does not verify publisher signatures.".to_string(),
+                "Each run uses a non-root user, no extra capabilities, a read-only root filesystem and no network. You approve any folder, network or port access every time.".into(),
+                "A container is not a safe place to run hostile code. Use a separate virtual machine for that.".into(),
+            ];
+            if manifest.container.is_none() {
+                n.push("This tool has no container policy, so it can be installed but not launched.".into());
+            }
+            n
+        }
+        InstallSpec::Winget { .. } => vec!["Package managers may add the tool to your PATH; Vixalune itself never changes it.".into()],
+        InstallSpec::DownloadArchive { .. } => vec![],
+    }
+}
+
 fn unsupported_reason(manifest: &ToolManifest, env: &EnvironmentReport) -> Option<String> {
     if !env.supported_os {
         return Some("Vixalune installs tools on Windows only.".into());
@@ -85,9 +109,12 @@ impl DependencyResolver for BasicDependencyResolver {
         };
         reason = reason.or_else(|| unsupported_reason(manifest, env));
 
+        let spec_for_notes = spec.clone();
         let prerequisites = status_for(manifest, env, &spec);
         let missing_prerequisites = prerequisites.iter().filter(|p| p.satisfied != Some(true)).map(|p| p.spec.kind).collect();
-        let prereq_admin = prerequisites.iter().any(|p| p.spec.requires_admin);
+        // Only prerequisites that still have to be installed can demand administrator rights or a restart.
+        let pending = |p: &&PrerequisiteStatus| p.satisfied != Some(true);
+        let prereq_admin = prerequisites.iter().filter(pending).any(|p| p.spec.requires_admin);
         let elevation = if prereq_admin && rank(manifest.privileges.install) < rank(ElevationNeed::Required) {
             ElevationNeed::Required
         } else {
@@ -96,7 +123,7 @@ impl DependencyResolver for BasicDependencyResolver {
         Ok(InstallPlan {
             tool_id: manifest.id.clone(),
             method: spec,
-            may_require_restart: manifest.privileges.may_require_restart || prerequisites.iter().any(|p| p.spec.requires_restart),
+            may_require_restart: manifest.privileges.may_require_restart || prerequisites.iter().filter(pending).any(|p| p.spec.requires_restart),
             prerequisites,
             missing_prerequisites,
             dependencies: manifest.dependencies.clone(),
@@ -106,6 +133,7 @@ impl DependencyResolver for BasicDependencyResolver {
             approx_disk_mb: manifest.storage.approx_disk_mb,
             license: manifest.license.clone(),
             integrity: manifest.integrity.level,
+            notes: notes_for(manifest, &spec_for_notes),
             unsupported_reason: reason,
         })
     }
@@ -128,6 +156,7 @@ mod tests {
             supported_os: true,
             windows_build: build,
             architecture: arch.into(),
+            free_disk_bytes: Some(500 << 30),
             components: vec![ComponentStatus { component: Prerequisite::Winget, state }],
             issues: vec![],
         }
@@ -180,12 +209,19 @@ mod tests {
     }
 
     #[test]
-    fn prerequisite_admin_requirement_raises_elevation() {
+    fn prerequisite_admin_requirement_only_applies_while_the_prerequisite_is_missing() {
         let mut m = manifest();
         m.prerequisites[0].requires_admin = true;
         m.prerequisites[0].requires_restart = true;
-        let plan = BasicDependencyResolver.resolve(&m, &env(Some(true), Some(26100), "x64"), &any).unwrap();
+        let plan = BasicDependencyResolver.resolve(&m, &env(Some(false), Some(26100), "x64"), &any).unwrap();
         assert_eq!(plan.elevation, ElevationNeed::Required);
         assert!(plan.may_require_restart);
+        // Once it is installed it no longer demands anything.
+        let plan = BasicDependencyResolver.resolve(&m, &env(Some(true), Some(26100), "x64"), &any).unwrap();
+        assert_eq!(plan.elevation, ElevationNeed::Possible);
+        assert!(!plan.may_require_restart);
     }
 }
+
+
+

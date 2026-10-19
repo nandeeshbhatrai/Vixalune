@@ -11,22 +11,28 @@ pub mod ports;
 
 use adapters::{
     activity_sqlite::SqliteActivityLogger,
-    env_detector::SystemEnvironmentDetector,
+    container::ContainerAdapter,
+    container_runner::ContainerToolRunner,
+    elevation::UacElevatedRunner,
     executor::SystemCommandExecutor,
+    host_facts::WindowsHostFacts,
     link_opener::SystemLinkOpener,
     locator::SystemExecutableLocator,
+    platform_detector::SystemPlatformDetector,
     registry::ManifestRegistry,
     resolver::BasicDependencyResolver,
+    setup::SetupEngine,
     sqlite_store::SqliteJobStore,
-    unimplemented::{UnimplementedLabManager, UnimplementedToolRunner},
+    unimplemented::UnimplementedLabManager,
     winget::WingetAdapter,
+    wsl::WslAptAdapter,
 };
 use commands::AppState;
 use config::AppConfig;
 use domain::activity::ActivityKind;
 use domain::jobs::Capabilities;
-use engine::{EngineDeps, InstallEngine};
-use ports::{InstallationManager, InstallerAdapter, TrustLevel};
+use engine::{EngineDeps, InstallEngine, RoutedJobs};
+use ports::{EnvironmentDetector, InstallationManager, InstallerAdapter, PlatformDetector, SetupManager, ToolRunner, TrustLevel};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
@@ -43,6 +49,7 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
     let data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
     let config = AppConfig::load_or_default(&data_dir.join("config.toml"), &data_dir)?;
+    let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
 
     let registry = ManifestRegistry::load_dir(&manifests_dir(app), TrustLevel::Bundled)?;
     let rejected: Vec<String> = registry.rejected.iter().map(|e| e.to_string()).collect();
@@ -51,27 +58,53 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
     }
     let registry = Arc::new(registry);
     let activity = Arc::new(SqliteActivityLogger::open(&config.storage.database_path)?);
+    let store = Arc::new(SqliteJobStore::open(&config.storage.database_path)?);
 
-    // The only adapter implemented and tested so far is winget; other install methods are
-    // reported as unsupported rather than faked.
-    let winget: Arc<dyn InstallerAdapter> =
-        Arc::new(WingetAdapter::new(Arc::new(SystemCommandExecutor), Arc::new(SystemExecutableLocator)));
+    let executor = Arc::new(SystemCommandExecutor);
+    let locator = Arc::new(SystemExecutableLocator);
+    let platform = Arc::new(SystemPlatformDetector::new(
+        executor.clone(),
+        locator.clone(),
+        Arc::new(WindowsHostFacts),
+        config.storage.tools_dir.clone(),
+        config.runtime.wsl_distribution.clone(),
+    ));
+
+    // Adapters. Each is an explicit, audited integration; there is no generic "run this" adapter.
+    let container = Arc::new(ContainerAdapter::new(executor.clone(), locator.clone(), config.runtime.approved_registries.clone(), home.clone()));
+    let adapters: Vec<Arc<dyn InstallerAdapter>> = vec![
+        Arc::new(WingetAdapter::new(executor.clone(), locator.clone())),
+        Arc::new(WslAptAdapter::new(executor.clone(), locator.clone(), config.runtime.wsl_distribution.clone())),
+        container.clone(),
+    ];
     let engine = InstallEngine::new(EngineDeps {
         registry: registry.clone(),
-        detector: Arc::new(SystemEnvironmentDetector),
+        detector: platform.clone() as Arc<dyn EnvironmentDetector>,
         resolver: Arc::new(BasicDependencyResolver),
-        adapters: vec![winget],
-        store: Arc::new(SqliteJobStore::open(&config.storage.database_path)?),
+        adapters,
+        store: store.clone(),
         activity: activity.clone(),
     });
     for job in engine.recover()? {
         tracing::warn!("closed interrupted job {} for {}", job.id, job.tool_id);
     }
+    let runner = Arc::new(ContainerToolRunner::new(
+        registry.clone(),
+        executor.clone(),
+        locator.clone(),
+        container,
+        store.clone(),
+        activity.clone(),
+        config.runtime.approved_registries.clone(),
+        home,
+    ));
+    let setup = SetupEngine::new(platform.clone() as Arc<dyn PlatformDetector>, executor, Arc::new(UacElevatedRunner), locator, store.clone(), activity.clone());
+
     let capabilities = Capabilities {
         install: true,
         uninstall: true,
         verify: true,
-        launch: false,
+        launch: true,
         jobs: true,
         labs: false,
         installed_detection: true,
@@ -88,11 +121,13 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
 
     let state = AppState {
         registry,
-        detector: Arc::new(SystemEnvironmentDetector),
+        detector: platform.clone() as Arc<dyn EnvironmentDetector>,
+        platform: platform as Arc<dyn PlatformDetector>,
+        setup: Arc::new(setup) as Arc<dyn SetupManager>,
         resolver: Arc::new(BasicDependencyResolver),
         installer: Arc::new(engine.clone()) as Arc<dyn InstallationManager>,
-        runner: Arc::new(UnimplementedToolRunner),
-        jobs: Arc::new(engine),
+        runner: runner.clone() as Arc<dyn ToolRunner>,
+        jobs: Arc::new(RoutedJobs { engine, runner }),
         labs: Arc::new(UnimplementedLabManager),
         links: Arc::new(SystemLinkOpener),
         capabilities,
@@ -116,6 +151,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_app_info,
             commands::detect_environment,
+            commands::get_platform_report,
             commands::list_tools,
             commands::get_tool,
             commands::recent_activity,
@@ -128,7 +164,12 @@ pub fn run() {
             commands::install_tool,
             commands::uninstall_tool,
             commands::verify_tool,
+            commands::preview_launch,
             commands::launch_tool,
+            commands::run_setup_action,
+            commands::request_restart,
+            commands::cancel_restart,
+            commands::open_setup_link,
             commands::list_labs,
             commands::open_link,
             commands::get_install_plan,
@@ -138,3 +179,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running Vixalune");
 }
+

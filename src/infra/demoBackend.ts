@@ -1,5 +1,6 @@
-import type { Backend } from "@/domain/backend";
+﻿import type { Backend } from "@/domain/backend";
 import type {
+  CapabilityReadiness,
   CatalogEntry,
   InstalledTool,
   InstallPlan,
@@ -7,6 +8,9 @@ import type {
   Job,
   JobPhase,
   LabDefinition,
+  PlatformReport,
+  RunPreview,
+  SetupAction,
   ToolManifest,
 } from "@/domain/types";
 
@@ -46,6 +50,7 @@ function tool(seed: ToolSeed): CatalogEntry {
       privileges: { install: "none", run: "none", may_require_restart: false },
       lifecycle: { can_update: true, can_uninstall: true },
       verify: { checks: [{ kind: "package_installed" }] },
+      container: null,
       launch_profiles: [],
       ...seed,
     },
@@ -93,6 +98,52 @@ export const DEMO_TOOLS: CatalogEntry[] = [
     prerequisites: [{ kind: "docker", reason: "Semgrep runs as a container image.", requires_admin: false, requires_restart: false }],
     integrity: { level: "image_digest", note: "Pinned by digest." },
     install: [{ method: "container_image", image: "semgrep/semgrep", digest: `sha256:${"0".repeat(64)}` }],
+    container: {
+      user: "65532:65532",
+      read_only_rootfs: true,
+      memory_mb: 1024,
+      cpus_milli: 1000,
+      pids_limit: 256,
+      tmpfs: ["/tmp"],
+      workdir: "/src",
+      env: [{ name: "HOME", value: "/tmp" }],
+      mounts: [{ name: "source", container_path: "/src", read_only: true }],
+      ports: [],
+    },
+    launch_profiles: [
+      {
+        id: "scan-local",
+        label: "Scan a folder with your own rules (offline)",
+        description: "No network access.",
+        runtime: "container",
+        executable: "semgrep",
+        parameters: [{ name: "config", label: "Rules file inside the folder", description: "", kind: { type: "text", max_len: 200 }, required: true, default: "/src/.semgrep.yml" }],
+        mounts: ["source"],
+        needs_network: false,
+        ports: [],
+      },
+      {
+        id: "scan-registry-rules",
+        label: "Scan with the Semgrep registry rules (needs internet)",
+        description: "Downloads the public rule set.",
+        runtime: "container",
+        executable: "semgrep",
+        parameters: [],
+        mounts: ["source"],
+        needs_network: true,
+        ports: [],
+      },
+    ],
+  }),
+  tool({
+    id: "nikto",
+    name: "Nikto",
+    summary: "Web server vulnerability scanner (runs inside WSL).",
+    category: "web_application",
+    license: "GPL-2.0-or-later",
+    platforms: ["wsl"],
+    prerequisites: [{ kind: "wsl2", reason: "Nikto is a Linux tool and runs inside a WSL 2 distribution.", requires_admin: true, requires_restart: true }],
+    install: [{ method: "wsl_apt", packages: ["nikto"] }],
   }),
   tool({
     id: "trivy",
@@ -129,6 +180,7 @@ export function createDemoBackend(): Backend {
     ["zap", "verification_failed"],
     ["trivy", "not_installed"],
     ["semgrep", "not_installed"],
+    ["nikto", "not_installed"],
   ]);
 
   const installed: InstalledTool[] = [
@@ -210,6 +262,104 @@ export function createDemoBackend(): Backend {
     return id;
   };
 
+  // Demo platform: Windows tools ready; WSL and containers need setup (so the wizard can be explored).
+  const platform = { wsl: false, distro: false, restartPending: false, restartScheduled: false };
+  const demoActions = (): SetupAction[] => {
+    const wsl: SetupAction = {
+      id: "install_wsl",
+      title: "Install Windows Subsystem for Linux (WSL 2)",
+      why: "Linux-based security tools run inside WSL 2, and Docker Desktop's Linux engine uses it on Windows Home.",
+      kind: "automatic",
+      requires_admin: true,
+      requires_restart: true,
+      command_preview: "wsl.exe --install --no-distribution",
+      official_link: "https://learn.microsoft.com/windows/wsl/install",
+      instructions: ["Windows will show an administrator (UAC) prompt for this one command.", "Windows may ask you to restart afterwards. Vixalune never restarts without asking you first."],
+      depends_on: [],
+    };
+    const distro: SetupAction = {
+      id: "install_distro",
+      title: "Install a Linux distribution (Ubuntu 24.04)",
+      why: "WSL needs at least one Linux distribution to hold Linux tools.",
+      kind: "automatic",
+      requires_admin: false,
+      requires_restart: false,
+      command_preview: "wsl.exe --install --distribution Ubuntu-24.04 --no-launch",
+      official_link: "https://learn.microsoft.com/windows/wsl/install",
+      instructions: ["Downloads Ubuntu from Microsoft's distribution list (a few hundred MB)."],
+      depends_on: ["install_wsl"],
+    };
+    const docker: SetupAction = {
+      id: "start_docker_desktop",
+      title: "Start Docker Desktop",
+      why: "Docker is installed but its engine is not running.",
+      kind: "manual",
+      requires_admin: false,
+      requires_restart: false,
+      command_preview: null,
+      official_link: "https://docs.docker.com/desktop/troubleshoot-and-support/troubleshoot/",
+      instructions: ["Open Docker Desktop from the Start menu and wait until it reports the engine is running, then re-check."],
+      depends_on: [],
+    };
+    return [...(platform.wsl ? [] : [wsl]), ...(platform.distro ? [] : [distro]), ...(platform.distro ? [] : [docker])];
+  };
+  const demoPlatform = (): PlatformReport => {
+    const ready = (s: string): CapabilityReadiness => ({ state: "ready", summary: s, missing: [], blockers: [], notes: [] });
+    const wslReady = platform.wsl && platform.distro;
+    return {
+      detected_at: new Date().toISOString(),
+      windows: { build: 26100, display_version: "24H2", edition: "Core", architecture: "x64" },
+      virtualization: { firmware_enabled: true, hypervisor_present: true },
+      features: [
+        { id: "virtualization_firmware", label: "CPU virtualization (VT-x / AMD-V)", state: "available", basis: "CPU feature flag reported by Windows" },
+        { id: "hypervisor", label: "Windows hypervisor (used by WSL 2 and Docker Desktop)", state: "available", basis: "CPUID hypervisor bit" },
+        { id: "wsl", label: "Windows Subsystem for Linux", state: platform.wsl ? "available" : "unavailable", basis: "wsl.exe responds to --status/--version" },
+        { id: "optional_features", label: "Virtual Machine Platform / WSL optional components", state: "unknown", basis: "Reading Windows optional features needs administrator rights; Vixalune never elevates just to detect, so these are inferred from the rows above" },
+      ],
+      wsl: {
+        installed: platform.wsl,
+        detail: platform.wsl ? null : "The Windows Subsystem for Linux is not installed.",
+        wsl_version: platform.wsl ? "2.3.26.0" : null,
+        default_version: platform.wsl ? 2 : null,
+        distros: platform.distro ? [{ name: "Ubuntu-24.04", state: "running", version: 2, is_default: true, internal: false, os_id: "ubuntu" }] : [],
+      },
+      containers: {
+        runtime: {
+          name: "docker",
+          cli_path: "C:\\Demo\\Docker\\docker.exe",
+          cli_version: "29.8.2",
+          context: "desktop-linux",
+          context_local: true,
+          daemon: { state: "stopped", reason: "failed to connect to the docker API; check if the daemon is running" },
+        },
+      },
+      package_managers: [{ name: "winget", scope: "Windows", version: "v1.9 (demo)" }],
+      disk: { path: "C:\\Demo\\Vixalune", free_bytes: 600 * 1024 ** 3, total_bytes: 1000 * 1024 ** 3 },
+      system: { pending_restart: platform.restartPending, proxy: null, policy_keys: [], is_elevated: false },
+      configured_distro: null,
+      readiness: {
+        windows_tools: ready("Ready to install Windows tools"),
+        linux_tools_wsl: wslReady
+          ? { ...ready("A WSL 2 distribution is ready"), notes: ["WSL shares your Windows files and network. It is not a security sandbox: only run tools you trust."] }
+          : {
+              state: "needs_setup",
+              summary: platform.wsl ? "No Linux distribution is installed" : "WSL is not installed",
+              missing: platform.wsl ? ["A Linux distribution"] : ["Windows Subsystem for Linux", "A Linux distribution"],
+              blockers: [],
+              notes: [],
+            },
+        containers: {
+          state: "needs_setup",
+          summary: "The container engine is not running",
+          missing: ["A running container engine"],
+          blockers: [],
+          notes: platform.wsl ? [] : ["Docker Desktop needs WSL 2 (or Hyper-V on Pro/Enterprise editions) to start its Linux engine; WSL is not installed here."],
+        },
+      },
+      setup_actions: demoActions(),
+    };
+  };
+
   return {
     isDemo: true,
     getAppInfo: async () => ({ name: "Vixalune", version: "demo", data_dir: "(demo)", rejected_manifests: [] }),
@@ -221,23 +371,9 @@ export function createDemoBackend(): Backend {
       jobs: true,
       labs: false,
       installed_detection: true,
-      install_methods: ["winget"],
+      install_methods: ["winget", "wsl_apt", "container_image"],
     }),
-    detectEnvironment: async () => ({
-      os: "windows",
-      supported_os: true,
-      windows_build: 26100,
-      architecture: "x64",
-      components: [
-        { component: "winget", state: "available", version: "v1.9 (demo)" },
-        { component: "wsl2", state: "missing" },
-        { component: "docker", state: "missing" },
-      ],
-      issues: [
-        { severity: "info", title: "WSL 2 was not found", recovery: "Run 'wsl --install' as administrator, restart, then re-check." },
-        { severity: "info", title: "Docker was not found", recovery: "Install Docker Desktop and start it, then re-check." },
-      ],
-    }),
+    getPlatformReport: async () => demoPlatform(),
     listTools: async (query) => {
       const text = query?.text?.toLowerCase() ?? "";
       return DEMO_TOOLS.filter(
@@ -276,13 +412,63 @@ export function createDemoBackend(): Backend {
         approx_disk_mb: m.storage.approx_disk_mb,
         license: m.license,
         integrity: m.integrity.level,
+        notes: m.platforms.includes("wsl") ? ["WSL is not a sandbox: Linux programs can read and change your Windows files and use your network."] : m.platforms.includes("container") ? ["A container is not a safe place to run hostile code."] : [],
         unsupported_reason: docker ? "Demo: this tool needs the container installer, which is not available." : null,
       };
     },
     installTool: async (id, allowElevation) => need(id) ?? simulate(id, "install", allowElevation, "installed"),
     uninstallTool: async (id, allowElevation) => need(id) ?? simulate(id, "uninstall", allowElevation, "not_installed"),
     verifyTool: async (id) => need(id) ?? simulate(id, "verify", false, "installed"),
-    launchTool: async (id) => need(id) ?? "demo-run",
+    previewLaunch: async (id, profile, _values, approvals): Promise<RunPreview> => {
+      const entry = DEMO_TOOLS.find((t) => t.manifest.id === id);
+      const p = entry?.manifest.launch_profiles.find((x) => x.id === profile);
+      if (!entry || !p) return Promise.reject(notFound(id));
+      if (p.needs_network && !approvals.network) return Promise.reject({ code: "validation", message: "validation failed: this profile needs network access, which you have not approved", recovery: "Correct the highlighted value and try again." });
+      const missingMount = p.mounts.find((m) => !approvals.mounts[m]);
+      if (missingMount) return Promise.reject({ code: "validation", message: `validation failed: choose and approve a folder for '${missingMount}'`, recovery: "Correct the highlighted value and try again." });
+      return {
+        command: { runtime: "container", program: p.executable, args: ["scan"], display: `${p.executable} scan /src` },
+        container: {
+          image: "docker.io/semgrep/semgrep@sha256:0000…",
+          command: `${p.executable} scan /src`,
+          user: "65532:65532",
+          network: p.needs_network ? "bridge" : "none",
+          mounts: p.mounts.map((m) => ({ host: approvals.mounts[m] ?? "", container: "/src", read_only: true })),
+          ports: [],
+          limits: "1024 MB memory, 1.00 CPU, 256 processes",
+          read_only_rootfs: true,
+          warnings: p.needs_network ? ["The container can reach the internet and your local network."] : [],
+        },
+      };
+    },
+    launchTool: async (id) => need(id) ?? simulate(id, "run", false, "installed"),
+    runSetupAction: async (id, confirmed) => {
+      if (!confirmed) return Promise.reject({ code: "validation", message: "validation failed: this changes your computer, so it needs your explicit confirmation", recovery: "Correct the highlighted value and try again." });
+      const jobId = `demo-job-${++counter}`;
+      const toolId = id === "install_wsl" ? "setup-install-wsl" : "setup-install-distro";
+      const j = job({ id: jobId, tool_id: toolId, kind: "setup", phase: "installing", message: "Demo: running the setup step…", allow_elevation: true });
+      jobs.unshift(j);
+      output[jobId] = ["[demo] This is simulated output; nothing was changed."];
+      setTimeout(() => {
+        if (id === "install_wsl") {
+          platform.wsl = true;
+          platform.restartPending = true;
+        } else {
+          platform.distro = true;
+        }
+        Object.assign(j, { phase: "succeeded" satisfies JobPhase, message: id === "install_wsl" ? "Demo: WSL was installed. Restart Windows to finish; Vixalune will not restart it without your confirmation." : "Demo: distribution installed", finished_at: new Date().toISOString(), exit_code: 0 });
+      }, 1500);
+      return jobId;
+    },
+    requestRestart: async (confirmed) => {
+      if (!confirmed) return Promise.reject({ code: "validation", message: "validation failed: restarting Windows needs your explicit confirmation", recovery: "Correct the highlighted value and try again." });
+      platform.restartScheduled = true; // Demo only: nothing is restarted.
+    },
+    cancelRestart: async () => {
+      platform.restartScheduled = false;
+      platform.restartPending = false;
+    },
+    openSetupLink: async () => undefined,
     approveJob: async (jobId) => {
       const j = jobs.find((x) => x.id === jobId);
       if (j?.phase === "awaiting_consent") j.phase = "installing";
@@ -300,3 +486,6 @@ export function createDemoBackend(): Backend {
     },
   };
 }
+
+
+

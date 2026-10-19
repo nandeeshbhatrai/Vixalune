@@ -1,15 +1,16 @@
-import { invoke } from "@tauri-apps/api/core";
+﻿import { invoke } from "@tauri-apps/api/core";
 import type { Backend } from "@/domain/backend";
 import type {
   ActivityEvent,
   AppInfo,
   Capabilities,
   CatalogEntry,
-  EnvironmentReport,
   InstalledTool,
   InstallPlan,
   Job,
   LabDefinition,
+  PlatformReport,
+  RunPreview,
   ToolQuery,
   ToolStateEntry,
 } from "@/domain/types";
@@ -19,7 +20,7 @@ export const tauriBackend: Backend = {
   isDemo: false,
   getAppInfo: () => invoke<AppInfo>("get_app_info"),
   getCapabilities: () => invoke<Capabilities>("get_capabilities"),
-  detectEnvironment: () => invoke<EnvironmentReport>("detect_environment"),
+  getPlatformReport: () => invoke<PlatformReport>("get_platform_report"),
   listTools: (query?: ToolQuery) => invoke<CatalogEntry[]>("list_tools", { query: query ?? null }),
   getTool: (id) => invoke<CatalogEntry>("get_tool", { id }),
   listToolStates: () => invoke<ToolStateEntry[]>("list_tool_states"),
@@ -33,8 +34,15 @@ export const tauriBackend: Backend = {
   installTool: (id, allowElevation) => invoke<string>("install_tool", { id, allowElevation }),
   uninstallTool: (id, allowElevation) => invoke<string>("uninstall_tool", { id, allowElevation }),
   verifyTool: (id) => invoke<string>("verify_tool", { id }),
-  launchTool: (id) => invoke<string>("launch_tool", { id }),
+  previewLaunch: (id, profile, values, approvals) => invoke<RunPreview>("preview_launch", { id, profile, values, approvals }),
+  launchTool: (id, profile, values, approvals) => invoke<string>("launch_tool", { id, profile, values, approvals }),
+  runSetupAction: (id, confirmed) => invoke<string>("run_setup_action", { id, confirmed }),
+  requestRestart: (confirmed, delaySecs) => invoke<void>("request_restart", { confirmed, delaySecs }),
+  cancelRestart: () => invoke<void>("cancel_restart"),
+  openSetupLink: (id) => invoke<void>("open_setup_link", { id }),
   approveJob: (jobId) => invoke<void>("approve_job", { id: jobId }),
   cancelJob: (jobId) => invoke<void>("cancel_job", { id: jobId }),
   openLink: (toolId, kind) => invoke<void>("open_link", { toolId, kind }),
 };
+
+

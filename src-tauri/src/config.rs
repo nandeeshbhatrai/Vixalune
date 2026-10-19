@@ -1,4 +1,4 @@
-//! Application configuration (TOML, stored in the app data directory). Contains paths and
+﻿//! Application configuration (TOML, stored in the app data directory). Contains paths and
 //! resource limits only - never credentials.
 
 use crate::domain::{AppError, AppResult};
@@ -18,6 +18,13 @@ pub struct StorageConfig {
 pub struct RuntimeConfig {
     pub wsl_distribution: Option<String>,
     pub docker_executable: Option<PathBuf>,
+    /// Container registries images may be pulled from.
+    #[serde(default = "default_registries")]
+    pub approved_registries: Vec<String>,
+}
+
+fn default_registries() -> Vec<String> {
+    crate::domain::container::DEFAULT_APPROVED_REGISTRIES.iter().map(|s| s.to_string()).collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,7 +53,7 @@ impl AppConfig {
                 labs_dir: data_dir.join("labs"),
                 database_path: data_dir.join("vixalune.db"),
             },
-            runtime: RuntimeConfig { wsl_distribution: None, docker_executable: None },
+            runtime: RuntimeConfig { wsl_distribution: None, docker_executable: None, approved_registries: default_registries() },
             resources: ResourceConfig { max_concurrent_installs: 1, max_concurrent_processes: 4, max_output_buffer_mb: 16 },
             remote_manifests_enabled: false,
         }
@@ -61,6 +68,9 @@ impl AppConfig {
             if d.is_empty() || !d.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
                 return Err(AppError::Validation("wsl_distribution contains invalid characters".into()));
             }
+        }
+        if self.runtime.approved_registries.iter().any(|r| r.is_empty() || r.len() > 255 || !r.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))) {
+            return Err(AppError::Validation("approved_registries contains an invalid host name".into()));
         }
         Ok(())
     }
@@ -111,3 +121,4 @@ mod tests {
         assert!(c.validate().is_err());
     }
 }
+

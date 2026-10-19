@@ -299,6 +299,62 @@ pub struct RunSpec {
     pub parameters: Vec<ParameterDef>,
     #[serde(default)]
     pub args: Vec<ArgTemplate>,
+    /// Container profiles only: names from `container.mounts` this profile needs the user to supply.
+    #[serde(default)]
+    pub mounts: Vec<String>,
+    /// Container profiles only: the profile needs outbound network access (requires approval at run time).
+    #[serde(default)]
+    pub needs_network: bool,
+    /// Container profiles only: container ports that may be published to 127.0.0.1 (requires approval).
+    #[serde(default)]
+    pub ports: Vec<u16>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MountSpec {
+    pub name: String,
+    /// Absolute POSIX path inside the container.
+    pub container_path: String,
+    #[serde(default = "yes")]
+    pub read_only: bool,
+}
+
+/// Hardening applied to every `docker run` for this tool. The values are *limits the manifest may
+/// tighten, never loosen*: privileged mode, host namespaces, devices and the Docker socket cannot be
+/// expressed here at all.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContainerPolicy {
+    /// Numeric `uid:gid`, never root.
+    pub user: String,
+    #[serde(default = "yes")]
+    pub read_only_rootfs: bool,
+    pub memory_mb: u32,
+    /// CPU limit in thousandths of a core (1000 = one core).
+    pub cpus_milli: u32,
+    pub pids_limit: u32,
+    #[serde(default)]
+    pub tmpfs: Vec<String>,
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub env: Vec<EnvVar>,
+    #[serde(default)]
+    pub mounts: Vec<MountSpec>,
+    /// Container ports that profiles may publish (always bound to 127.0.0.1).
+    #[serde(default)]
+    pub ports: Vec<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -342,6 +398,8 @@ pub struct ToolManifest {
     pub privileges: Privileges,
     pub lifecycle: Lifecycle,
     pub verify: VerifySpec,
+    /// Required when any launch profile runs in a container.
+    pub container: Option<ContainerPolicy>,
     #[serde(default)]
     pub launch_profiles: Vec<RunSpec>,
 }
@@ -602,6 +660,29 @@ impl ToolManifest {
             }
         }
 
+        if let Some(cp) = &self.container {
+            for e in cp.validate() {
+                bad(false, format!("container: {e}"));
+            }
+            bad(self.platforms.contains(&RuntimeKind::Container), "container policy given but 'container' is not in platforms".into());
+        }
+        for run in &self.launch_profiles {
+            if run.runtime == RuntimeKind::Container {
+                match &self.container {
+                    None => bad(false, format!("launch profile '{}' runs in a container but the manifest has no [container] policy", run.id)),
+                    Some(cp) => {
+                        for m in &run.mounts {
+                            bad(cp.mounts.iter().any(|x| &x.name == m), format!("launch profile '{}' uses unknown mount '{m}'", run.id));
+                        }
+                        for p in &run.ports {
+                            bad(cp.ports.contains(p), format!("launch profile '{}' publishes port {p} which the container policy does not allow", run.id));
+                        }
+                    }
+                }
+            } else {
+                bad(run.mounts.is_empty() && run.ports.is_empty() && !run.needs_network, format!("launch profile '{}': mounts, ports and needs_network apply to container profiles only", run.id));
+            }
+        }
         if errs.is_empty() {
             Ok(())
         } else {
@@ -614,6 +695,74 @@ impl ToolManifest {
     }
 }
 
+impl ContainerPolicy {
+    pub fn validate(&self) -> Vec<String> {
+        let mut e = Vec::new();
+        let numeric = |s: &str| !s.is_empty() && s.len() <= 10 && s.chars().all(|c| c.is_ascii_digit());
+        match self.user.split_once(':') {
+            Some((u, g)) if numeric(u) && numeric(g) && u != "0" && g != "0" && u.trim_start_matches('0') != "" && g.trim_start_matches('0') != "" => {}
+            _ => e.push(format!("user '{}' must be a numeric non-root uid:gid", self.user)),
+        }
+        if !(64..=16384).contains(&self.memory_mb) {
+            e.push("memory_mb must be 64-16384".into());
+        }
+        if !(100..=8000).contains(&self.cpus_milli) {
+            e.push("cpus_milli must be 100-8000".into());
+        }
+        if !(16..=4096).contains(&self.pids_limit) {
+            e.push("pids_limit must be 16-4096".into());
+        }
+        let posix_ok = |p: &str| {
+            p.starts_with('/')
+                && p.len() > 1
+                && p.len() <= 120
+                && !p.split('/').any(|s| s == "..")
+                && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '.' | '-'))
+        };
+        for t in &self.tmpfs {
+            if !posix_ok(t) {
+                e.push(format!("invalid tmpfs path '{t}'"));
+            }
+        }
+        if let Some(w) = &self.workdir {
+            if !posix_ok(w) {
+                e.push(format!("invalid workdir '{w}'"));
+            }
+        }
+        if self.env.len() > 16 {
+            e.push("at most 16 env entries".into());
+        }
+        for v in &self.env {
+            let name_ok = !v.name.is_empty() && v.name.len() <= 64 && v.name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') && !v.name.starts_with(|c: char| c.is_ascii_digit());
+            let upper = v.name.to_ascii_uppercase();
+            let secretish = ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "API_KEY", "APIKEY", "CREDENTIAL", "PRIVATE"].iter().any(|k| upper.contains(k));
+            if !name_ok || secretish {
+                e.push(format!("env name '{}' is invalid or looks like a secret (secrets are never put in manifests)", v.name));
+            }
+            if v.value.len() > 256 || v.value.chars().any(|c| c.is_control()) {
+                e.push(format!("env value for '{}' is invalid", v.name));
+            }
+        }
+        let mut names = std::collections::HashSet::new();
+        for m in &self.mounts {
+            if !param_name_ok(&m.name) || !names.insert(m.name.as_str()) {
+                e.push(format!("invalid or duplicate mount name '{}'", m.name));
+            }
+            if !posix_ok(&m.container_path) || matches!(m.container_path.as_str(), "/proc" | "/sys" | "/dev" | "/etc" | "/var/run" | "/run") || m.container_path.starts_with("/var/run/") || m.container_path.starts_with("/run/") {
+                e.push(format!("mount '{}' has an unsafe container path '{}'", m.name, m.container_path));
+            }
+        }
+        if self.mounts.len() > 4 {
+            e.push("at most 4 mounts".into());
+        }
+        for p in &self.ports {
+            if *p == 0 {
+                e.push("port 0 is invalid".into());
+            }
+        }
+        e
+    }
+}
 // ---------------------------------------------------------------- command construction
 
 /// A fully validated command. `program` and `args` are what gets executed (no shell);
@@ -979,3 +1128,4 @@ mod tests {
         .is_err());
     }
 }
+

@@ -78,3 +78,25 @@ Known gaps and accepted risks:
 - Killing winget with `taskkill /T` ends the process tree but cannot undo what an installer already did; rollback only runs `winget uninstall` for packages this job installed.
 - No Job Objects yet; a hard crash of Vixalune can orphan an installer process.
 - The 1.5 s UI polling interval is the only progress channel (no push events).
+
+## 7. Phase 4 update: WSL, containers and setup
+
+| Threat | Control | Status |
+|---|---|---|
+| WSL/containers mistaken for sandboxes | Stated in the plan dialog, wizard and readiness notes: WSL shares Windows files and network; containers are not safe for hostile code (use a separate VM) | Done (text) |
+| Shell injection through WSL | `--exec` with absolute programs, validated package/distribution names, no shell; tests with `;`, `$()`, `-o`, `|` | Done |
+| Root in WSL mistaken for Windows admin | `--user root` is root inside the distribution only; documented in the adapter and wizard | Done |
+| Untrusted registry/image | Registry allow-list, digest-only references, `--pull never` at run time; **no signature (cosign) verification** | Partly |
+| Container escape/over-privilege | Non-root, `--cap-drop ALL`, `no-new-privileges`, read-only root, limits, no privileged/host namespaces/devices/socket; guard re-checks the final argv | Done (policy) |
+| Mounting sensitive host folders | Validator refuses drives, Windows, Program Files, ProgramData, user profile roots, `.ssh`/`.aws`/…, `AppData`, UNC/device paths; canonicalises junctions then re-validates; read-only by default | Done |
+| Silent network/port exposure | Network `none` unless the profile needs it and the user approves; ports only on `127.0.0.1`, host ports 1024+, each approved per run | Done |
+| Running containers against a remote engine | Remote contexts, `DOCKER_HOST`, ssh/tcp endpoints and Windows containers are refused | Done |
+| Surprise system changes | Setup actions are proposals; `confirmed` is required; one fixed UAC command for WSL; distro install unelevated; Docker Desktop/BIOS/policies are never touched | Done |
+| Surprise restart | Separate step, explicit confirmation, 30-600 s cancellable delay (`shutdown /r /t N`, `/a` to cancel), never `/f` | Done |
+| Elevated argument injection | Elevated arguments limited to `[A-Za-z0-9-_.:/\]`; absolute existing program only | Done |
+| Bypassing corporate controls | Policy keys and proxies are reported, not altered; errors keep Windows' text and say to contact the administrator | Done |
+| Orphaned containers | Named, labelled (`vixalune.tool`), removed on cancel/timeout/uninstall; a hard crash can leave one: `docker rm -f` command in docs | Partly |
+| Disk exhaustion | Free-space gate before every job (manifest estimate or per-method default) | Done |
+
+Residual risks: Docker Desktop's engine runs as root in its VM and members of `docker-users` are effectively administrators; Vixalune's own `docker`
+calls inherit that. WSL distributions are persistent Linux machines that can be modified by any tool inside them.

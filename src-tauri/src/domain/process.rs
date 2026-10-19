@@ -1,4 +1,4 @@
-//! Process, progress and install-plan models shared by the ports.
+﻿//! Process, progress and install-plan models shared by the ports.
 
 use super::ids::{OperationId, ProcessId, ToolId};
 use super::manifest::{ElevationNeed, InstallSpec, IntegrityLevel, Prerequisite, PrerequisiteSpec};
@@ -97,6 +97,9 @@ pub struct InstallPlan {
     pub approx_disk_mb: Option<u32>,
     pub license: String,
     pub integrity: IntegrityLevel,
+    /// Plain-language warnings the user should read before agreeing (isolation limits, where it installs).
+    #[serde(default)]
+    pub notes: Vec<String>,
     /// Set when this tool cannot be installed here at all (Windows too old, wrong architecture,
     /// no adapter). Distinct from a missing prerequisite, which the user can fix.
     pub unsupported_reason: Option<String>,
@@ -121,3 +124,4 @@ mod tests {
         assert!(b.is_cancelled());
     }
 }
+

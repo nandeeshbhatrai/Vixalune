@@ -1,4 +1,4 @@
-//! Activity events and secret redaction. Redaction is applied by the logger before anything
+﻿//! Activity events and secret redaction. Redaction is applied by the logger before anything
 //! is persisted, so a caller cannot forget it.
 
 use super::ids::ToolId;
@@ -20,6 +20,11 @@ pub enum ActivityKind {
     LabStarted,
     LabStopped,
     SettingsChanged,
+    SetupStarted,
+    SetupSucceeded,
+    SetupFailed,
+    RestartRequested,
+    RestartCancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,3 +119,4 @@ mod tests {
         assert_eq!(redact("Installed nmap 7.95 successfully"), "Installed nmap 7.95 successfully");
     }
 }
+

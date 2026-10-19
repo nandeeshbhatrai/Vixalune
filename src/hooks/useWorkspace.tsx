@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { deriveStatus, missingPrerequisites, type ToolStatus } from "@/domain/toolStatus";
-import type { AppErrorDto, Capabilities, CatalogEntry, EnvironmentReport, InstallState, Job, Prerequisite } from "@/domain/types";
+import { toEnvironment } from "@/domain/platform";
+import type { AppErrorDto, Capabilities, CatalogEntry, EnvironmentReport, InstallState, Job, PlatformReport, Prerequisite } from "@/domain/types";
 import { useBackend } from "@/infra/backendContext";
 import { isActivePhase } from "@/presentation/labels";
 import { toAppError, useAsync, type AsyncState } from "./useAsync";
@@ -15,7 +16,9 @@ export interface Workspace {
   core: AsyncState<CoreData>;
   /** Job list, refreshed while any job is active. */
   jobs: AsyncState<Job[]>;
-  /** null while loading or when detection failed; see `envError`. */
+  /** Full platform report; null while loading or when detection failed (see `envError`). */
+  platform: PlatformReport | null;
+  /** Component view derived from `platform`, used for prerequisite checks. */
   env: EnvironmentReport | null;
   envLoading: boolean;
   envError: AppErrorDto | null;
@@ -36,7 +39,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const backend = useBackend();
   const [core, setCore] = useState<AsyncState<CoreData>>({ status: "loading" });
   const [jobs, setJobs] = useState<AsyncState<Job[]>>({ status: "loading" });
-  const [envState, reloadEnv] = useAsync(() => backend.detectEnvironment(), [backend]);
+  const [envState, reloadEnv] = useAsync(() => backend.getPlatformReport(), [backend]);
 
   const loadCore = useCallback(async () => {
     try {
@@ -85,7 +88,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     wasActive.current = anyActive;
   }, [anyActive, loadCore]);
 
-  const env = envState.status === "ready" ? envState.data : null;
+  const platform = envState.status === "ready" ? envState.data : null;
+  const env = useMemo(() => (platform ? toEnvironment(platform) : null), [platform]);
   const coreData = core.status === "ready" ? core.data : null;
 
   const missingFor = useCallback(
@@ -108,6 +112,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     () => ({
       core,
       jobs,
+      platform,
       env,
       envLoading: envState.status === "loading",
       envError: envState.status === "error" ? envState.error : null,
@@ -121,7 +126,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       missingFor,
       activeJobFor,
     }),
-    [core, jobs, env, envState, loadCore, loadJobs, reloadEnv, statusOf, missingFor, activeJobFor],
+    [core, jobs, platform, env, envState, loadCore, loadJobs, reloadEnv, statusOf, missingFor, activeJobFor],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
@@ -134,3 +139,4 @@ export function useWorkspace(): Workspace {
 }
 
 export { toAppError };
+

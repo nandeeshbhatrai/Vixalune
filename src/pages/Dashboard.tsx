@@ -1,5 +1,4 @@
-﻿import { CheckCircle2, CircleHelp, MinusCircle, XCircle } from "lucide-react";
-import { Link } from "react-router-dom";
+﻿import { Link } from "react-router-dom";
 import { AsyncView } from "@/components/AsyncView";
 import { DemoTag } from "@/components/DemoTag";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -9,27 +8,12 @@ import { ToolIcon } from "@/components/ToolIcon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import type { ComponentStatus } from "@/domain/types";
 import { useAsync } from "@/hooks/useAsync";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useBackend } from "@/infra/backendContext";
-import { formatTime, isActivePhase, PREREQ_LABEL } from "@/presentation/labels";
+import { formatTime, isActivePhase, READINESS_META } from "@/presentation/labels";
 
 const INSTALL_KINDS = new Set(["install_started", "install_succeeded", "install_failed", "uninstalled", "verified"]);
-
-function ComponentRow({ c }: { c: ComponentStatus }) {
-  const Icon = c.state === "available" ? CheckCircle2 : c.state === "missing" ? MinusCircle : CircleHelp;
-  const tone = c.state === "available" ? "text-success" : c.state === "missing" ? "text-warning" : "text-muted-foreground";
-  return (
-    <li className="flex items-center gap-2">
-      <Icon size={16} className={tone} aria-hidden />
-      <span>{PREREQ_LABEL[c.component]}</span>
-      <span className="text-muted-foreground">
-        {c.state === "available" ? (c.version ? `found (${c.version})` : "found") : c.state === "missing" ? "not found" : `could not check: ${c.reason}`}
-      </span>
-    </li>
-  );
-}
 
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
@@ -90,33 +74,34 @@ export function Dashboard() {
             </p>
           ) : ws.envError ? (
             <ErrorNotice error={ws.envError} onRetry={ws.recheckEnvironment} />
-          ) : ws.env ? (
+          ) : ws.platform ? (
             <div className="space-y-3">
-              <ul className="space-y-1.5" aria-label="Environment checklist">
-                <li className="flex items-center gap-2">
-                  {ws.env.supported_os ? <CheckCircle2 size={16} className="text-success" aria-hidden /> : <XCircle size={16} className="text-destructive" aria-hidden />}
-                  <span>Windows</span>
-                  <span className="text-muted-foreground">{ws.env.supported_os ? "supported" : "unsupported operating system"}</span>
-                </li>
-                {ws.env.components.map((c) => (
-                  <ComponentRow key={c.component} c={c} />
+              <ul className="space-y-2" aria-label="Environment checklist">
+                {(
+                  [
+                    ["Windows tools (winget)", ws.platform.readiness.windows_tools],
+                    ["Linux tools (WSL 2)", ws.platform.readiness.linux_tools_wsl],
+                    ["Container tools (Docker)", ws.platform.readiness.containers],
+                  ] as const
+                ).map(([name, r]) => (
+                  <li key={name} className="flex items-start gap-2">
+                    <Badge tone={READINESS_META[r.state].tone}>{READINESS_META[r.state].label}</Badge>
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium">{name}</span>
+                      <span className="block text-muted-foreground">{r.summary}</span>
+                      {(r.blockers[0] ?? r.missing[0]) ? <span className="block text-xs text-muted-foreground">{r.blockers[0] ?? `Missing: ${r.missing[0]}`}</span> : null}
+                    </span>
+                  </li>
                 ))}
               </ul>
-              {ws.env.issues.length > 0 ? (
-                <section aria-label="Setup issues" className="space-y-2">
-                  {ws.env.issues.map((i) => (
-                    <div key={i.title} className="rounded-md bg-muted p-2.5">
-                      <p className="font-medium">{i.title}</p>
-                      <p className="text-muted-foreground">{i.recovery}</p>
-                    </div>
-                  ))}
-                </section>
-              ) : (
-                <p className="text-muted-foreground">No setup issues found.</p>
-              )}
-              <Button variant="outline" size="sm" onClick={ws.recheckEnvironment}>
-                Re-check
-              </Button>
+              <div className="flex gap-2">
+                <Button size="sm" asChild>
+                  <Link to="/setup">{ws.platform.setup_actions.length > 0 ? "Open Setup" : "Review setup"}</Link>
+                </Button>
+                <Button variant="outline" size="sm" onClick={ws.recheckEnvironment}>
+                  Re-check
+                </Button>
+              </div>
             </div>
           ) : null}
         </Card>
@@ -179,4 +164,5 @@ export function Dashboard() {
     </div>
   );
 }
+
 

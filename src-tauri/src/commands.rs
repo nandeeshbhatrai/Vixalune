@@ -4,12 +4,14 @@ use crate::domain::activity::{ActivityEvent, ActivityKind};
 use crate::domain::environment::EnvironmentReport;
 use crate::domain::jobs::{Capabilities, InstalledTool, Job, LinkKind, ToolStateEntry};
 use crate::domain::lab::LabDefinition;
-use crate::domain::process::{OutputLine, OutputSink};
+use crate::domain::container::RunApprovals;
+use crate::domain::manifest::ParamValue;
+use crate::domain::platform::{PlatformReport, SetupActionId};
 use crate::domain::process::InstallPlan;
-use crate::domain::{AppError, AppResult, OperationId, RunId, ToolId};
+use crate::domain::{AppError, AppResult, OperationId, ToolId};
 use crate::ports::{
     ActivityLogger, CatalogEntry, DependencyResolver, EnvironmentDetector, InstallationManager, JobRegistry, LabManager,
-    LinkOpener, ToolQuery, ToolRegistry, ToolRunner,
+    LinkOpener, PlatformDetector, RunPreview, SetupManager, ToolQuery, ToolRegistry, ToolRunner,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -21,6 +23,8 @@ use tauri::State;
 pub struct AppState {
     pub registry: Arc<dyn ToolRegistry>,
     pub detector: Arc<dyn EnvironmentDetector>,
+    pub platform: Arc<dyn PlatformDetector>,
+    pub setup: Arc<dyn SetupManager>,
     pub resolver: Arc<dyn DependencyResolver>,
     pub installer: Arc<dyn InstallationManager>,
     pub runner: Arc<dyn ToolRunner>,
@@ -64,10 +68,7 @@ pub fn get_app_info(state: State<'_, AppState>) -> AppInfo {
 
 #[tauri::command]
 pub async fn detect_environment(state: State<'_, AppState>) -> AppResult<EnvironmentReport> {
-    let detector = state.detector.clone();
-    let report = tauri::async_runtime::spawn_blocking(move || detector.detect())
-        .await
-        .map_err(|e| AppError::Environment(e.to_string()))?;
+    let report = state.detector.detect().await;
     log(&state, ActivityKind::EnvironmentChecked, &format!("{} setup issue(s) found", report.issues.len()));
     Ok(report)
 }
@@ -134,15 +135,27 @@ pub async fn verify_tool(state: State<'_, AppState>, id: String) -> AppResult<Op
     state.installer.verify(&ToolId::new(id)?).await
 }
 
-struct DiscardOutput;
-impl OutputSink for DiscardOutput {
-    fn line(&self, _: OutputLine) {}
+#[tauri::command]
+pub fn preview_launch(
+    state: State<'_, AppState>,
+    id: String,
+    profile: String,
+    values: Option<HashMap<String, ParamValue>>,
+    approvals: Option<RunApprovals>,
+) -> AppResult<RunPreview> {
+    state.runner.preview(&ToolId::new(id)?, &profile, &values.unwrap_or_default(), &approvals.unwrap_or_default())
 }
 
-/// Launch with default parameters. Output streaming is wired up with the run interface.
+/// Start a launch profile. Container runs only start with exactly the approvals the user confirmed.
 #[tauri::command]
-pub async fn launch_tool(state: State<'_, AppState>, id: String) -> AppResult<RunId> {
-    state.runner.start(&ToolId::new(id)?, "default", &HashMap::new(), Arc::new(DiscardOutput)).await
+pub async fn launch_tool(
+    state: State<'_, AppState>,
+    id: String,
+    profile: String,
+    values: Option<HashMap<String, ParamValue>>,
+    approvals: Option<RunApprovals>,
+) -> AppResult<OperationId> {
+    state.runner.start(&ToolId::new(id)?, &profile, &values.unwrap_or_default(), &approvals.unwrap_or_default()).await
 }
 
 #[tauri::command]
@@ -180,3 +193,37 @@ pub async fn approve_job(state: State<'_, AppState>, id: OperationId) -> AppResu
 pub async fn refresh_tool_states(state: State<'_, AppState>) -> AppResult<()> {
     state.installer.refresh_states().await
 }
+
+
+/// Full platform report: facts, readiness per capability, and proposed (never performed) setup steps.
+#[tauri::command]
+pub async fn get_platform_report(state: State<'_, AppState>) -> AppResult<PlatformReport> {
+    let report = state.platform.detect().await;
+    log(&state, ActivityKind::EnvironmentChecked, "platform readiness checked");
+    Ok(report)
+}
+
+/// Run one automatic setup step. `confirmed` must be true: this changes the computer.
+#[tauri::command]
+pub async fn run_setup_action(state: State<'_, AppState>, id: SetupActionId, confirmed: bool) -> AppResult<OperationId> {
+    state.setup.run_action(id, confirmed).await
+}
+
+/// Schedule a Windows restart after a cancellable delay. Only after explicit confirmation.
+#[tauri::command]
+pub async fn request_restart(state: State<'_, AppState>, confirmed: bool, delay_secs: Option<u32>) -> AppResult<()> {
+    state.setup.request_restart(confirmed, delay_secs.unwrap_or(60)).await
+}
+
+#[tauri::command]
+pub async fn cancel_restart(state: State<'_, AppState>) -> AppResult<()> {
+    state.setup.cancel_restart().await
+}
+
+/// Open the official guide for a setup step. The URL comes from the fixed step definition, not the UI.
+#[tauri::command]
+pub fn open_setup_link(state: State<'_, AppState>, id: SetupActionId) -> AppResult<()> {
+    let link = crate::domain::platform::setup_action(id).official_link.ok_or_else(|| AppError::NotFound("a guide for that step".into()))?;
+    state.links.open(&link)
+}
+

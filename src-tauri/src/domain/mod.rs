@@ -2,6 +2,7 @@
 
 pub mod activity;
 pub mod ai;
+pub mod assistant;
 pub mod container;
 pub mod environment;
 pub mod errors;

@@ -654,6 +654,8 @@ export interface AiProviderView {
 
 export interface AiSettings {
   history_days: number;
+  /** The person agreed that package names and versions may be sent to OSV and NVD. */
+  allow_vulnerability_lookup: boolean;
 }
 
 export interface AiOverview {
@@ -754,3 +756,5 @@ export type AiStreamEvent = { request_id: string; conversation_id: string; messa
       error: AiErrorInfo | null;
     }
 );
+
+export * from "./assistantTypes";

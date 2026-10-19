@@ -130,3 +130,13 @@ ZAP's command-line flags and install folder are unverified on real hardware.
 | Prompt injection via model output causing actions | No tools offered; output rendered as inert text/Markdown | User copies a harmful command and runs it |
 | Sensitive data sent to a cloud provider | Prominent notice; nothing attached automatically; retention control | User pastes sensitive data |
 | Silent provider/model switch or cost surprise | Never switches on failure; cost shown only if provider-reported; bounded retries | Provider-side billing |
+
+## Tool-aware assistant (Phase 9)
+
+| Threat | Mitigation | Residual |
+|---|---|---|
+| Prompt injection through a package description, advisory or scan output | Fenced as untrusted; no tools offered; typed closed action set; authorization in code; output validated | The model can still write misleading prose; it is labelled as model-written and checked for unverifiable identifiers and links |
+| Fabricated tools, versions, CVEs or citations | Tool/profile ids checked against the registry; identifiers must appear in retrieved data; citations come from an application-built evidence list | A real identifier can be attached to a wrong explanation |
+| Silent install or run | No such action exists; Install and Prepare Scan open the existing confirmation flows | None known |
+| Data leaving the computer | Lookups need consent and send only ecosystem/name/version; scan output needs a confirmation naming the provider, is bounded and credential-filtered | The provider sees what you ask and the catalog records used |
+| False reassurance from an empty result | Coverage notes always shown; safety claims flagged; not-assessed classes listed | Users may still over-trust |

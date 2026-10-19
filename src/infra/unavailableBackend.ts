@@ -73,6 +73,12 @@ export const unavailableBackend: Backend = {
   aiRetry: fail,
   aiCancel: fail,
   aiOpenProviderPage: fail,
+  assistantAsk: fail,
+  assistantRetry: fail,
+  assistantExplainRun: fail,
+  assistantTurns: fail,
+  assistantRunAction: fail,
+  assistantOpenEvidence: fail,
   onAiEvent: async () => () => {},
 };
 

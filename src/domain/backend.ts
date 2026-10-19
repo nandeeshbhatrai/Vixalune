@@ -34,6 +34,9 @@
   AiSettings,
   AiStreamEvent,
   AiTestReport,
+  AssistantAction,
+  AssistantActionOutcome,
+  AssistantTurnEntry,
 } from "./types";
 
 /**
@@ -132,6 +135,15 @@ export interface Backend {
   aiRetry(conversationId: string, provider: string, model: string): Promise<AiSendAck>;
   aiCancel(requestId: string): Promise<void>;
   aiOpenProviderPage(provider: string, page: "key" | "docs"): Promise<void>;
+  // Tool-aware assistant: retrieval, lookups and validation happen in the backend.
+  assistantAsk(input: AiSendInput): Promise<AiSendAck>;
+  assistantRetry(conversationId: string, provider: string, model: string): Promise<AiSendAck>;
+  /** `consent` is the person's answer to "send part of this run's output to your AI provider?". */
+  assistantExplainRun(conversationId: string, runId: string, consent: boolean, provider: string, model: string): Promise<AiSendAck>;
+  assistantTurns(conversationId: string): Promise<AssistantTurnEntry[]>;
+  /** An action the person chose. The backend validates and authorizes it again. */
+  assistantRunAction(action: AssistantAction): Promise<AssistantActionOutcome>;
+  assistantOpenEvidence(conversationId: string, messageId: string, evidenceId: string): Promise<void>;
   /** Streamed answer events. Resolves with the function that stops listening. */
   onAiEvent(handler: (event: AiStreamEvent) => void): Promise<() => void>;
 }

@@ -2,6 +2,7 @@
 
 pub mod activity_sqlite;
 pub mod ai;
+pub mod assistant;
 pub mod host_facts;
 pub mod container;
 pub mod container_runner;

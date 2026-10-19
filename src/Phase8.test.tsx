@@ -31,7 +31,7 @@ function provider(over: Partial<AiProviderView> = {}, id = "openai"): AiProvider
 }
 
 function overview(providers: AiProviderView[]): AiOverview {
-  return { providers, credential_backend: "Windows Credential Manager (protected for your Windows account)", settings: { history_days: 30 } };
+  return { providers, credential_backend: "Windows Credential Manager (protected for your Windows account)", settings: { history_days: 30, allow_vulnerability_lookup: false } };
 }
 
 const KEYED = (extra: Partial<AiProviderView> = {}) => provider({ has_key: true, active: true, key_hint: "sk-••••••••  (28 characters)", ...extra });
@@ -142,6 +142,10 @@ describe("Settings → AI Providers", () => {
   });
 });
 
+async function plainMode() {
+  await userEvent.click(await screen.findByRole("checkbox", { name: /Use the tool catalog/ }));
+}
+
 describe("AI Assistant", () => {
   const conv: AiConversation = { id: "c1", title: "Nmap question", provider: "openai", model: "model-a", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
   const userMsg: AiMessage = { id: "u1", conversation_id: "c1", seq: 0, role: "user", content: "Explain nmap -F", status: "complete", error_code: null, error_message: null, provider: null, model: null, usage: null, created_at: "2026-01-01T00:00:00Z" };
@@ -183,6 +187,7 @@ describe("AI Assistant", () => {
       aiGetConversation: async () => ({ conversation: conv, messages: [userMsg, final] }),
     });
     renderApp("/assistant", be);
+    await plainMode();
     await waitFor(() => expect(screen.getByLabelText("Model")).toBeEnabled());
     await userEvent.selectOptions(screen.getByLabelText("Model"), "model-a");
     await userEvent.type(screen.getByLabelText("Message"), "Explain nmap -F");
@@ -220,6 +225,7 @@ describe("AI Assistant", () => {
     const retry = vi.fn(async () => ({ request_id: "r2", conversation_id: "c1", user_message: userMsg, assistant_message_id: "a2" }));
     const { be } = chatBackend({ aiListConversations: async () => [conv], aiGetConversation: async () => ({ conversation: conv, messages: [userMsg, failed] }), aiRetry: retry });
     renderApp("/assistant", be);
+    await plainMode();
     await userEvent.click(await screen.findByRole("button", { name: conv.title }));
     expect(await screen.findByText(/rate limiting/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText("Model")).toBeEnabled());

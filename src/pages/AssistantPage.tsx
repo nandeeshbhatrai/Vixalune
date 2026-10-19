@@ -1,7 +1,8 @@
-import { Bot, Copy, MessageSquarePlus, RotateCcw, Square, Trash2 } from "lucide-react";
+import { Bot, Copy, FileSearch, MessageSquarePlus, RotateCcw, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Markdown } from "@/components/ai/Markdown";
+import { TurnView } from "@/components/ai/TurnView";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -10,7 +11,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { fieldClass } from "@/components/run/ParamFields";
 import { Button } from "@/components/ui/button";
 import { formatCost, formatTokens, usableModels } from "@/domain/ai";
-import type { AiConversation, AiErrorInfo, AiMessage, AiOverview, AiProviderView, AiStreamEvent } from "@/domain/types";
+import type { AiConversation, AiErrorInfo, AiMessage, AiOverview, AiProviderView, AiStreamEvent, AssistantTurn, RunRecord } from "@/domain/types";
 import { toAppError } from "@/hooks/useAsync";
 import { useBackend } from "@/infra/backendContext";
 
@@ -33,8 +34,15 @@ export function AssistantPage() {
   const [models, setModels] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [live, setLive] = useState<Live | null>(null);
+  const [busyAsk, setBusyAsk] = useState(false);
   const [error, setError] = useState<AiErrorInfo | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [useCatalog, setUseCatalog] = useState(true);
+  const [turns, setTurns] = useState<Record<string, AssistantTurn>>({});
+  const [explainOpen, setExplainOpen] = useState(false);
+  const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [runId, setRunId] = useState("");
+  const finishedRef = useRef<Set<string>>(new Set());
   const currentRef = useRef<string | null>(null);
   const liveRef = useRef<Live | null>(null);
   currentRef.current = currentId;
@@ -47,6 +55,12 @@ export function AssistantPage() {
       const d = await backend.aiGetConversation(id);
       setCurrentId(id);
       setMessages(d.messages);
+      try {
+        const entries = await backend.assistantTurns(id);
+        setTurns(Object.fromEntries(entries.map((e) => [e.message_id, e.turn])));
+      } catch {
+        setTurns({});
+      }
     },
     [backend],
   );
@@ -107,6 +121,7 @@ export function AssistantPage() {
       else if (ev.event === "delta") setLive((l) => (l && l.requestId === ev.request_id ? { ...l, text: l.text + ev.text, retrying: null } : l));
       else if (ev.event === "retrying") setLive((l) => (l && l.requestId === ev.request_id ? { ...l, retrying: `Retrying in ${ev.wait_secs}s (attempt ${ev.attempt + 1}): ${ev.reason}` } : l));
       else if (ev.event === "finished") {
+        finishedRef.current.add(ev.request_id);
         setLive(null);
         void loadConversation(ev.conversation_id);
         void refreshList();
@@ -122,7 +137,7 @@ export function AssistantPage() {
   }, [backend, loadConversation, refreshList]);
 
   const providerView: AiProviderView | undefined = overview?.providers.find((p) => p.descriptor.id === provider);
-  const streaming = live !== null;
+  const streaming = live !== null || busyAsk;
 
   const newConversation = async () => {
     setError(null);
@@ -144,13 +159,22 @@ export function AssistantPage() {
     const conv = currentId ? { id: currentId } : await newConversation();
     if (!conv) return;
     try {
-      const ack = await backend.aiSendMessage({ conversation_id: conv.id, text, provider, model });
-      setDraft("");
+      const input = { conversation_id: conv.id, text, provider, model };
       currentRef.current = conv.id;
-      setMessages((m) => [...m, ack.user_message]);
-      setLive({ requestId: ack.request_id, messageId: ack.assistant_message_id, text: "", retrying: null });
+      setBusyAsk(true);
+      const ack = await (useCatalog ? backend.assistantAsk(input) : backend.aiSendMessage(input));
+      setDraft("");
+      if (finishedRef.current.has(ack.request_id)) {
+        await loadConversation(conv.id);
+        await refreshList();
+      } else {
+        setMessages((m) => [...m, ack.user_message]);
+        setLive({ requestId: ack.request_id, messageId: ack.assistant_message_id, text: "", retrying: null });
+      }
     } catch (e) {
       fail(e);
+    } finally {
+      setBusyAsk(false);
     }
   };
 
@@ -158,11 +182,59 @@ export function AssistantPage() {
     if (!currentId) return;
     setError(null);
     try {
-      const ack = await backend.aiRetry(currentId, provider, model);
+      const ack = await (useCatalog ? backend.assistantRetry(currentId, provider, model) : backend.aiRetry(currentId, provider, model));
       await loadConversation(currentId);
-      setLive({ requestId: ack.request_id, messageId: ack.assistant_message_id, text: "", retrying: null });
+      if (!finishedRef.current.has(ack.request_id)) setLive({ requestId: ack.request_id, messageId: ack.assistant_message_id, text: "", retrying: null });
     } catch (e) {
       fail(e);
+    }
+  };
+
+  const allowLookupsAndAsk = async (questionText: string) => {
+    setError(null);
+    try {
+      const o = await backend.aiOverview();
+      await backend.aiUpdateSettings({ ...o.settings, allow_vulnerability_lookup: true });
+      setOverview(await backend.aiOverview());
+      setDraft(questionText);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const openExplain = async () => {
+    setError(null);
+    try {
+      const all = await backend.listRuns(30);
+      const done = all.filter((r) => r.outcome !== null);
+      setRuns(done);
+      setRunId(done[0]?.id ?? "");
+      setExplainOpen(true);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const explain = async () => {
+    if (!runId) return;
+    setExplainOpen(false);
+    setError(null);
+    try {
+      const conv = currentId ? { id: currentId } : await newConversation();
+      if (!conv) return;
+      currentRef.current = conv.id;
+      setBusyAsk(true);
+      const ack = await backend.assistantExplainRun(conv.id, runId, true, provider, model);
+      if (finishedRef.current.has(ack.request_id)) await loadConversation(conv.id);
+      else {
+        await loadConversation(conv.id);
+        setLive({ requestId: ack.request_id, messageId: ack.assistant_message_id, text: "", retrying: null });
+      }
+      await refreshList();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusyAsk(false);
     }
   };
 
@@ -191,6 +263,13 @@ export function AssistantPage() {
   };
 
   const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => undefined);
+
+  const assistantBody = (m: AiMessage) => {
+    const turn = turns[m.id];
+    if (!turn) return <Markdown text={m.content} />;
+    const q = messages[messages.findIndex((x) => x.id === m.id) - 1]?.content ?? "";
+    return <TurnView turn={turn} conversationId={m.conversation_id} messageId={m.id} onAllowLookups={turn.consent_request ? () => void allowLookupsAndAsk(q) : undefined} />;
+  };
 
   if (loadError) return <ErrorNotice error={loadError} onRetry={() => window.location.reload()} />;
   if (!overview) return <LoadingState label="Loading the assistant" />;
@@ -251,6 +330,15 @@ export function AssistantPage() {
                   ))}
                 </select>
               </div>
+              <label className="flex items-center gap-1.5 self-center text-xs">
+                <input type="checkbox" checked={useCatalog} disabled={streaming} onChange={(e) => setUseCatalog(e.target.checked)} />
+                Use the tool catalog (recommended)
+              </label>
+              {useCatalog ? (
+                <Button variant="outline" size="sm" disabled={streaming} onClick={() => void openExplain()}>
+                  <FileSearch size={13} aria-hidden /> Explain a scan run…
+                </Button>
+              ) : null}
               {models.length === 0 ? <p className="self-center text-xs text-muted-foreground">No verified model yet — <Link className="text-primary underline" to="/settings/ai">test the connection</Link>.</p> : null}
             </div>
 
@@ -259,13 +347,13 @@ export function AssistantPage() {
               {messages.map((m) => (
                 <article key={m.id} aria-label={m.role === "user" ? "You" : "Assistant"} className={m.role === "user" ? "ml-8 rounded-md bg-muted p-3" : "mr-8 rounded-md border border-border p-3"}>
                   <p className="mb-1 text-xs font-semibold text-muted-foreground">{m.role === "user" ? "You" : `Assistant${m.model ? ` · ${m.model}` : ""}`}</p>
-                  {m.role === "user" ? <p className="whitespace-pre-wrap break-words">{m.content}</p> : m.id === live?.messageId ? null : <Markdown text={m.content} />}
+                  {m.role === "user" ? <p className="whitespace-pre-wrap break-words">{m.content}</p> : m.id === live?.messageId ? null : assistantBody(m)}
                   {m.role === "assistant" && m.id !== live?.messageId ? (
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                       {m.status !== "complete" ? <span className="font-medium text-destructive">{m.status === "cancelled" ? "Stopped" : m.status === "interrupted" ? "Interrupted — partial answer" : "Failed"}{m.error_message ? `: ${m.error_message}` : ""}</span> : null}
                       {formatTokens(m.usage) ? <span>{formatTokens(m.usage)}</span> : null}
                       <span>{formatCost(m.usage)}</span>
-                      {m.content ? <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => copy(m.content)}><Copy size={12} aria-hidden /> Copy response</button> : null}
+                      {m.content && !turns[m.id] ? <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => copy(m.content)}><Copy size={12} aria-hidden /> Copy response</button> : null}
                     </div>
                   ) : null}
                 </article>
@@ -273,7 +361,7 @@ export function AssistantPage() {
               {live ? (
                 <article aria-label="Assistant" className="mr-8 rounded-md border border-border p-3">
                   <p className="mb-1 text-xs font-semibold text-muted-foreground">Assistant · {model}</p>
-                  {live.text ? <Markdown text={live.text} /> : <p role="status" className="text-muted-foreground">{live.retrying ?? "Waiting for the provider…"}</p>}
+                  {live.text ? <Markdown text={live.text} /> : <p role="status" className="text-muted-foreground">{live.retrying ?? (useCatalog ? "Checking the catalog and drafting an answer… the reply is checked before it is shown." : "Waiting for the provider…")}</p>}
                 </article>
               ) : null}
             </div>
@@ -298,6 +386,28 @@ export function AssistantPage() {
           </section>
         </div>
       )}
+      <ConfirmDialog
+        open={explainOpen}
+        onOpenChange={setExplainOpen}
+        title="Explain a scan run"
+        description={`Part of the stored output of the run you choose (at most 400 lines, with lines that look like credentials withheld) will be sent to ${providerView?.descriptor.display_name ?? "your AI provider"} over the internet, and the provider may bill you. The output is treated as untrusted text. It is not saved in the conversation.`}
+        confirmLabel="Send and explain"
+        confirmDisabled={!runId}
+        onConfirm={() => void explain()}
+      >
+        {runs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">There are no finished runs yet. Run a tool first.</p>
+        ) : (
+          <div>
+            <label htmlFor="explain-run" className="mb-1 block text-sm font-medium">Run</label>
+            <select id="explain-run" className={fieldClass} value={runId} onChange={(e) => setRunId(e.target.value)}>
+              {runs.map((r) => (
+                <option key={r.id} value={r.id}>{r.tool_name} — {r.profile_label} ({r.started_at})</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </ConfirmDialog>
       <ConfirmDialog open={confirmDelete !== null} onOpenChange={(o) => !o && setConfirmDelete(null)} title="Delete this conversation?" description="It is removed from this computer. It cannot be undone." confirmLabel="Delete" destructive onConfirm={() => confirmDelete && void remove(confirmDelete)} />
     </div>
   );

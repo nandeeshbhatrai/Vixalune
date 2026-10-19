@@ -50,3 +50,10 @@ Only test systems you own or have written permission to test. Do not point Vixal
 - Redirects are disabled and provider addresses must be HTTPS, so a key cannot follow a redirect.
 - Model output is untrusted: rendered as Markdown without raw HTML, images or live links; no tools are offered to a model, so output can never run a command.
 - Residual risk: local malware or a compromised Windows session can use credentials the app can use. Prompts go to the cloud provider. See docs/AI_GATEWAY.md.
+
+## Tool-aware assistant
+
+- Model output is validated against the tool registry and the evidence the application collected; unknown tools, profiles, citations, links and vulnerability identifiers are removed and reported. See docs/ASSISTANT.md.
+- No tools are offered to a model. The action set is closed and typed, has no install/run/command action, and authorization (model origin may only read catalog records; lookups need consent; runs need the person) is decided in code.
+- Untrusted text (user messages, vulnerability descriptions, scan output) is cleaned, bounded and fenced with a per-request random marker, but the defence does not rely on the model obeying it.
+- Package lookups send only ecosystem, name and version to OSV/NVD, and only after consent. Scan output is shared only after the person confirms, with credential-looking lines withheld, and is not stored in the conversation.

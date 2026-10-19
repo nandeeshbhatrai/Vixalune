@@ -209,6 +209,17 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         }
         svc
     };
+    let assistant = adapters::assistant::service::AssistantService::new(
+        ai.clone(),
+        Arc::new(adapters::assistant::facts::AppToolFacts {
+            registry: registry.clone() as Arc<dyn ports::ToolRegistry>,
+            installer: Arc::new(engine.clone()) as Arc<dyn InstallationManager>,
+            runner: runner.clone() as Arc<dyn ToolRunner>,
+            history: store.clone() as Arc<dyn RunHistory>,
+            store: store.clone() as Arc<dyn ports::JobStore>,
+        }),
+        Arc::new(adapters::assistant::osv::OsvSource::default()),
+    );
 
     let state = AppState {
         registry,
@@ -234,6 +245,7 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         rejected_manifests: rejected,
         startup_notices,
         ai,
+        assistant,
         config_path,
         config: std::sync::Mutex::new(config.clone()),
         data_dir_overridden,
@@ -315,6 +327,12 @@ pub fn run() {
             ai_commands::ai_retry,
             ai_commands::ai_cancel,
             ai_commands::ai_open_provider_page,
+            ai_commands::assistant_ask,
+            ai_commands::assistant_retry,
+            ai_commands::assistant_explain_run,
+            ai_commands::assistant_turns,
+            ai_commands::assistant_run_action,
+            ai_commands::assistant_open_evidence,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Vixalune")

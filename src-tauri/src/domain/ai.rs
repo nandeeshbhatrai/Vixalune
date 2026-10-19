@@ -632,6 +632,9 @@ pub struct AiSettings {
     /// Conversations not touched for this many days are deleted (0 = delete everything at the next start).
     #[serde(default = "default_history_days")]
     pub history_days: u32,
+    /// The person agreed that package names and versions they ask about may be sent to public vulnerability databases (OSV, NVD).
+    #[serde(default)]
+    pub allow_vulnerability_lookup: bool,
 }
 
 fn default_history_days() -> u32 {
@@ -640,7 +643,7 @@ fn default_history_days() -> u32 {
 
 impl Default for AiSettings {
     fn default() -> Self {
-        Self { history_days: default_history_days() }
+        Self { history_days: default_history_days(), allow_vulnerability_lookup: false }
     }
 }
 

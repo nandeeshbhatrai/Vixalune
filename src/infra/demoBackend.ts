@@ -540,6 +540,12 @@ export function createDemoBackend(): Backend {
     aiRetry: noAi,
     aiCancel: noAi,
     aiOpenProviderPage: noAi,
+    assistantAsk: noAi,
+    assistantRetry: noAi,
+    assistantExplainRun: noAi,
+    assistantTurns: noAi,
+    assistantRunAction: noAi,
+    assistantOpenEvidence: noAi,
     onAiEvent: async () => () => {},
   };
 }

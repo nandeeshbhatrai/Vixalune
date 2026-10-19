@@ -36,7 +36,7 @@ Full instructions, requirements, updating and uninstalling: [docs/INSTALLATION.m
 
 ## AI assistant (optional)
 
-Bring your own key for OpenAI, Anthropic, Google Gemini or OpenRouter. Keys live only in Windows Credential Manager; messages are sent to the provider you choose. See [docs/AI_GATEWAY.md](docs/AI_GATEWAY.md).
+Bring your own key for OpenAI, Anthropic, Google Gemini or OpenRouter. Keys live only in Windows Credential Manager; messages are sent to the provider you choose. See [docs/AI_GATEWAY.md](docs/AI_GATEWAY.md). The assistant can also recommend tools from the catalog and look up known package vulnerabilities: [docs/ASSISTANT.md](docs/ASSISTANT.md).
 
 ## Known limitations
 

@@ -272,6 +272,7 @@ function Panels({ initial }: { initial: AiOverview }) {
   const [selected, setSelected] = useState(overview.providers.find((p) => p.active)?.descriptor.id ?? overview.providers[0]?.descriptor.id ?? "");
   const [days, setDays] = useState(String(overview.settings.history_days));
   const [saved, setSaved] = useState(false);
+  const [lookup, setLookup] = useState(overview.settings.allow_vulnerability_lookup);
   const view = overview.providers.find((p) => p.descriptor.id === selected) ?? overview.providers[0];
   const unavailable = overview.providers.find((p) => p.credential_error)?.credential_error;
 
@@ -313,7 +314,7 @@ function Panels({ initial }: { initial: AiOverview }) {
           <Button
             onClick={async () => {
               setSaved(false);
-              if (await run(() => backend.aiUpdateSettings({ history_days: Number(days) }))) {
+              if (await run(() => backend.aiUpdateSettings({ history_days: Number(days), allow_vulnerability_lookup: lookup }))) {
                 setSaved(true);
                 reload();
               }
@@ -322,6 +323,12 @@ function Panels({ initial }: { initial: AiOverview }) {
             Save
           </Button>
         </div>
+        <label className="mt-3 flex items-start gap-2">
+          <input type="checkbox" className="mt-1" checked={lookup} onChange={(e) => setLookup(e.target.checked)} />
+          <span>
+            Allow vulnerability database lookups. When you ask the assistant about a package, its ecosystem, name and version are sent to the public OSV database (api.osv.dev) and, for CVE identifiers, NVD (nvd.nist.gov). Nothing else is sent. Off by default.
+          </span>
+        </label>
         <p className="mt-1 text-xs text-muted-foreground">Old conversations are deleted when the app starts and when you save this. Command output and file contents are never added to conversations by Vixalune.</p>
         {saved ? <p role="status" className="mt-2">Saved.</p> : null}
         {error ? <div className="mt-2"><ErrorNotice error={error} /></div> : null}

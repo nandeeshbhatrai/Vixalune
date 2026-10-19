@@ -25,6 +25,34 @@ pub const SYSTEM_PROMPT: &str = "You are an assistant inside Vixalune, a Windows
 Help the user understand concepts, tool options and results. You cannot run commands or read the user's files, and you must never ask for passwords or API keys. \
 When it matters, remind the user to test only systems they own or have written permission to test.";
 
+/// Turns a model's raw reply into what is stored and shown. Used by the tool-aware assistant, which validates the reply against
+/// the application's own facts before anything is kept.
+pub trait TurnFinalizer: Send + Sync {
+    fn finalize(&self, raw: &str) -> Finalized;
+}
+
+pub struct Finalized {
+    /// Plain text kept as the message content (and sent back to the model as history).
+    pub content: String,
+    /// The structured answer, stored beside the message.
+    pub turn_json: Option<String>,
+    pub error: Option<AiError>,
+}
+
+/// How one request differs from a plain chat message.
+#[derive(Default, Clone)]
+pub struct Prepared {
+    pub system: Option<String>,
+    /// What the model sees as the newest user message, when it is more than what the person typed (retrieved context). The stored
+    /// message is always only what the person typed.
+    pub model_user_text: Option<String>,
+    /// Do not stream text to the interface (the reply is structured and is shown only after validation).
+    pub hide_deltas: bool,
+    pub finalizer: Option<Arc<dyn TurnFinalizer>>,
+    /// Sets the stored title of a new conversation when the typed text is not a good one.
+    pub title: Option<String>,
+}
+
 const MODEL_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_CONCURRENT_REQUESTS: usize = 4;
 const MAX_ATTEMPTS: u32 = 3;
@@ -146,6 +174,7 @@ struct ServiceSink {
     /// The assistant message as written so far (what the user has seen). Saved every couple of seconds so a crash loses little.
     message: Mutex<StoredMessage>,
     last_flush: Mutex<Instant>,
+    hide_deltas: bool,
 }
 
 impl ServiceSink {
@@ -174,7 +203,9 @@ impl StreamSink for ServiceSink {
                         let _ = self.store.update_message(&m);
                     }
                 }
-                self.send(AiUiEventKind::Delta { text: text.clone() });
+                if !self.hide_deltas {
+                    self.send(AiUiEventKind::Delta { text: text.clone() });
+                }
             }
             StreamEvent::Usage { usage } => self.send(AiUiEventKind::Usage { usage: usage.clone() }),
             _ => {}
@@ -555,6 +586,21 @@ impl AiService {
         self.running.lock().unwrap().len()
     }
 
+    /// The checks on typed text that do not need a key: not empty, not too long, no credential-shaped text.
+    pub fn check_user_text(&self, text: &str) -> AppResult<()> {
+        let bad = |m: &str| Err(AppError::Ai(AiError::new(AiErrorKind::InvalidRequest, m)));
+        if text.trim().is_empty() {
+            return bad("write a message first");
+        }
+        if text.chars().count() > MAX_USER_MESSAGE_CHARS {
+            return Err(AppError::Ai(AiError::new(AiErrorKind::TooLarge, format!("a message can be at most {MAX_USER_MESSAGE_CHARS} characters"))));
+        }
+        if looks_like_credential(text) {
+            return bad("your message looks like it contains an API key or password. Remove it: messages are sent to the provider and kept in your history");
+        }
+        Ok(())
+    }
+
     /// Refuse a message that looks like it carries a credential: it would be sent to the provider and stored in the history.
     fn check_message_text(&self, text: &str, key: &Secret) -> AppResult<()> {
         let bad = |m: &str| Err(AppError::Ai(AiError::new(AiErrorKind::InvalidRequest, m)));
@@ -570,7 +616,7 @@ impl AiService {
         Ok(())
     }
 
-    fn build_request(&self, history: &[StoredMessage], new_user: &ChatMessage, model: &str, cfg: &ProviderConfig) -> ChatRequest {
+    fn build_request(&self, history: &[StoredMessage], new_user: &ChatMessage, model: &str, cfg: &ProviderConfig, system: &str) -> ChatRequest {
         let mut msgs: Vec<ChatMessage> = history
             .iter()
             .filter(|m| m.status == MessageStatus::Complete && !m.content.trim().is_empty() && matches!(m.role, Role::User | Role::Assistant))
@@ -578,7 +624,7 @@ impl AiService {
             .collect();
         msgs.push(new_user.clone());
         // Keep the conversation within the size bound by dropping the oldest messages; start on a user turn.
-        let mut total: usize = msgs.iter().map(|m| m.content.chars().count()).sum::<usize>() + SYSTEM_PROMPT.len();
+        let mut total: usize = msgs.iter().map(|m| m.content.chars().count()).sum::<usize>() + system.len();
         while total > MAX_CONTEXT_CHARS && msgs.len() > 1 {
             total -= msgs.remove(0).content.chars().count();
         }
@@ -596,12 +642,17 @@ impl AiService {
                 _ => merged.push(m),
             }
         }
-        ChatRequest { model: model.to_string(), system: Some(SYSTEM_PROMPT.to_string()), messages: merged, tools: vec![], params: GenerationParams { temperature: cfg.temperature, max_output_tokens: Some(cfg.max_output_tokens.unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS)) }, idle_timeout_secs: cfg.timeout_secs }
+        ChatRequest { model: model.to_string(), system: Some(system.to_string()), messages: merged, tools: vec![], params: GenerationParams { temperature: cfg.temperature, max_output_tokens: Some(cfg.max_output_tokens.unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS)) }, idle_timeout_secs: cfg.timeout_secs }
     }
 
     /// Send a message and stream the answer. Returns as soon as the request has been accepted for sending; the answer arrives as
     /// events and is stored when it ends.
     pub fn send_message(self: &Arc<Self>, input: SendInput, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
+        self.send_prepared(input, Prepared::default(), events)
+    }
+
+    /// Like `send_message`, with the system prompt, the model-visible text and the finalizer supplied by the caller.
+    pub fn send_prepared(self: &Arc<Self>, input: SendInput, prep: Prepared, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
         let provider = self.provider(&input.provider)?;
         let key = self.key(&input.provider)?;
         self.check_message_text(&input.text, &key)?;
@@ -619,8 +670,9 @@ impl AiService {
             }
         }
         let history = self.store.list_messages(&conversation.id)?;
-        let new_user = ChatMessage::user(input.text.clone());
-        let request = self.build_request(&history, &new_user, &input.model, &cfg);
+        let new_user = ChatMessage::user(prep.model_user_text.clone().unwrap_or_else(|| input.text.clone()));
+        let system = prep.system.clone().unwrap_or_else(|| SYSTEM_PROMPT.to_string());
+        let request = self.build_request(&history, &new_user, &input.model, &cfg, &system);
         ai(provider.validate_request(&request))?;
 
         let t = now();
@@ -631,7 +683,7 @@ impl AiService {
         conv.model = Some(input.model.clone());
         conv.updated_at = t;
         if history.is_empty() {
-            conv.title = input.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(TITLE_CHARS).collect();
+            conv.title = prep.title.clone().unwrap_or_else(|| input.text.clone()).split_whitespace().collect::<Vec<_>>().join(" ").chars().take(TITLE_CHARS).collect();
         }
         self.store.update_conversation(&conv)?;
 
@@ -641,17 +693,18 @@ impl AiService {
         let ack = SendAck { request_id: request_id.clone(), conversation_id: conv.id.clone(), user_message, assistant_message_id: assistant.id.clone() };
 
         let me = self.clone();
-        let sink = Arc::new(ServiceSink { events, store: self.store.clone(), request_id: request_id.clone(), conversation_id: conv.id.clone(), message_id: assistant.id.clone(), text_seen: AtomicBool::new(false), message: Mutex::new(assistant.clone()), last_flush: Mutex::new(Instant::now()) });
+        let sink = Arc::new(ServiceSink { events, store: self.store.clone(), request_id: request_id.clone(), conversation_id: conv.id.clone(), message_id: assistant.id.clone(), text_seen: AtomicBool::new(false), message: Mutex::new(assistant.clone()), last_flush: Mutex::new(Instant::now()), hide_deltas: prep.hide_deltas });
+        let finalizer = prep.finalizer.clone();
         let provider_id = input.provider.clone();
         let model = input.model.clone();
         tokio::spawn(async move {
-            me.run_request(provider, provider_id, model, key, request, cfg, sink, cancel, request_id).await;
+            me.run_request(provider, provider_id, model, key, request, cfg, sink, cancel, request_id, finalizer).await;
         });
         Ok(ack)
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run_request(&self, provider: Arc<dyn AiProvider>, provider_id: String, model: String, key: Secret, request: ChatRequest, cfg: ProviderConfig, sink: Arc<ServiceSink>, cancel: CancellationToken, request_id: String) {
+    async fn run_request(&self, provider: Arc<dyn AiProvider>, provider_id: String, model: String, key: Secret, request: ChatRequest, cfg: ProviderConfig, sink: Arc<ServiceSink>, cancel: CancellationToken, request_id: String, finalizer: Option<Arc<dyn TurnFinalizer>>) {
         let mut message = sink.written();
         sink.send(AiUiEventKind::Started { provider: provider_id.clone(), model: model.clone() });
         let mut attempt = 0u32;
@@ -674,8 +727,24 @@ impl AiService {
         let (status, finish, usage, error) = match result {
             Ok(o) => {
                 message.content = o.text.clone();
-                let status = if o.finish.is_none() && o.text.is_empty() { MessageStatus::Failed } else { MessageStatus::Complete };
-                let err = if status == MessageStatus::Failed { Some(AiError::new(AiErrorKind::Protocol, "the provider ended the response without any content")) } else { None };
+                let mut status = if o.finish.is_none() && o.text.is_empty() { MessageStatus::Failed } else { MessageStatus::Complete };
+                let mut err = if status == MessageStatus::Failed { Some(AiError::new(AiErrorKind::Protocol, "the provider ended the response without any content")) } else { None };
+                if let (Some(f), MessageStatus::Complete) = (finalizer.as_ref(), status) {
+                    let done = f.finalize(&o.text);
+                    match (done.error, done.turn_json) {
+                        (None, Some(json)) => {
+                            message.content = done.content;
+                            if let Err(e) = self.store.put_turn(&message.id, &message.conversation_id, &json) {
+                                tracing::warn!("could not store the assistant answer: {e}");
+                            }
+                        }
+                        (e, _) => {
+                            message.content = String::new();
+                            status = MessageStatus::Failed;
+                            err = Some(e.unwrap_or_else(|| AiError::new(AiErrorKind::Protocol, "the answer could not be checked")));
+                        }
+                    }
+                }
                 let mut finish = o.finish.clone();
                 if o.truncated_by_limit {
                     finish = Some(FinishReason::Length);
@@ -695,8 +764,12 @@ impl AiService {
             }
         };
         // The text of an interrupted or cancelled reply is kept: it is what the user saw.
-        if matches!(status, MessageStatus::Interrupted | MessageStatus::Cancelled | MessageStatus::Failed) {
+        if matches!(status, MessageStatus::Interrupted | MessageStatus::Cancelled | MessageStatus::Failed) && finalizer.is_none() {
             message.content = sink.written().content;
+        }
+        if finalizer.is_some() && status != MessageStatus::Complete {
+            // Raw structured text that failed validation is not kept or shown.
+            message.content = String::new();
         }
         message.status = status;
         message.error_code = error.as_ref().map(|e| e.kind.code().to_string());
@@ -711,6 +784,13 @@ impl AiService {
 
     /// Re-send the last user message after a failed, stopped or interrupted answer. This is always an explicit user action.
     pub fn retry_last(self: &Arc<Self>, conversation_id: &str, provider: String, model: String, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
+        let text = self.take_last_failed_question(conversation_id)?;
+        self.send_message(SendInput { conversation_id: conversation_id.to_string(), text, provider, model }, events)
+    }
+
+    /// Remove the last failed, stopped or cut-off answer and the question it answered; return the question's text so it can be asked
+    /// again. Always the result of an explicit user action.
+    pub fn take_last_failed_question(&self, conversation_id: &str) -> AppResult<String> {
         let messages = self.store.list_messages(conversation_id)?;
         let Some(last) = messages.last() else { return Err(AppError::NotFound("a message to retry".into())) };
         if last.role != Role::Assistant || last.status == MessageStatus::Complete || last.status == MessageStatus::Streaming {
@@ -721,7 +801,50 @@ impl AiService {
         let (user_id, assistant_id) = (user.id.clone(), last.id.clone());
         self.store.delete_message(&assistant_id)?;
         self.store.delete_message(&user_id)?;
-        let r = self.send_message(SendInput { conversation_id: conversation_id.to_string(), text, provider, model }, events);
-        r
+        Ok(text)
+    }
+
+    /// Store a question and an answer that the application produced itself, without asking a model (for example when details are
+    /// missing). The events keep the interface path the same as for a model reply.
+    pub fn record_local_turn(&self, conversation_id: &str, user_text: &str, answer_text: &str, turn_json: &str, events: &dyn AiEventSink) -> AppResult<SendAck> {
+        let conversation = self.store.get_conversation(conversation_id)?;
+        let t = now();
+        let history_empty = self.store.list_messages(conversation_id)?.is_empty();
+        let user_message = self.store.append_message(&StoredMessage { id: uuid::Uuid::new_v4().to_string(), conversation_id: conversation.id.clone(), seq: 0, role: Role::User, content: user_text.to_string(), status: MessageStatus::Complete, error_code: None, error_message: None, provider: None, model: None, usage: None, created_at: t.clone() })?;
+        let assistant = self.store.append_message(&StoredMessage { id: uuid::Uuid::new_v4().to_string(), conversation_id: conversation.id.clone(), seq: 0, role: Role::Assistant, content: answer_text.to_string(), status: MessageStatus::Complete, error_code: None, error_message: None, provider: None, model: None, usage: None, created_at: t.clone() })?;
+        self.store.put_turn(&assistant.id, &conversation.id, turn_json)?;
+        let mut conv = conversation;
+        conv.updated_at = t;
+        if history_empty {
+            conv.title = user_text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(TITLE_CHARS).collect();
+        }
+        self.store.update_conversation(&conv)?;
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let ev = |kind| AiUiEvent { request_id: request_id.clone(), conversation_id: conv.id.clone(), message_id: assistant.id.clone(), kind };
+        events.emit(ev(AiUiEventKind::Finished { status: MessageStatus::Complete, finish_reason: None, usage: Usage::default(), error: None }));
+        Ok(SendAck { request_id, conversation_id: conv.id, user_message, assistant_message_id: assistant.id })
+    }
+
+    pub fn turns(&self, conversation_id: &str) -> AppResult<Vec<(String, String)>> {
+        self.store.list_turns(conversation_id)
+    }
+
+    pub fn settings(&self) -> AppResult<AiSettings> {
+        self.store.get_settings()
+    }
+
+    pub fn conversation(&self, id: &str) -> AppResult<Conversation> {
+        self.store.get_conversation(id)
+    }
+
+    pub fn history(&self, conversation_id: &str) -> AppResult<Vec<StoredMessage>> {
+        self.store.list_messages(conversation_id)
+    }
+
+    /// Whether a provider has a key and a usable model; used before spending effort on retrieval.
+    pub fn ready_for(&self, provider: &str, model: &str) -> AppResult<()> {
+        self.provider(provider)?;
+        self.key(provider)?;
+        self.require_usable_model(provider, model)
     }
 }

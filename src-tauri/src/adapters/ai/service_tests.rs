@@ -591,8 +591,8 @@ fn retention_deletes_old_conversations_and_zero_days_deletes_everything_and_star
     let (closed, purged) = h.svc.startup().unwrap();
     assert_eq!((closed, purged), (1, 1), "the old conversation went, the cut-off reply was closed");
     assert_eq!(h.svc.get_conversation(&fresh.id).unwrap().messages[0].status, MessageStatus::Interrupted);
-    assert!(h.svc.update_settings(AiSettings { history_days: 4000 }).is_err());
-    h.svc.update_settings(AiSettings { history_days: 0 }).unwrap();
+    assert!(h.svc.update_settings(AiSettings { history_days: 4000, ..Default::default() }).is_err());
+    h.svc.update_settings(AiSettings { history_days: 0, ..Default::default() }).unwrap();
     assert!(h.svc.list_conversations().unwrap().is_empty(), "0 days keeps nothing");
     assert_eq!(h.svc.overview().unwrap().settings.history_days, 0);
 }

@@ -75,7 +75,17 @@ impl SqliteAiStore {
                 usage_json TEXT,
                 created_at TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS ai_messages_conv ON ai_messages(conversation_id, seq);",
+            CREATE INDEX IF NOT EXISTS ai_messages_conv ON ai_messages(conversation_id, seq);
+            CREATE TABLE IF NOT EXISTS ai_turns (
+                message_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                turn_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ai_turns_conv ON ai_turns(conversation_id);
+            CREATE TRIGGER IF NOT EXISTS ai_turns_cleanup AFTER DELETE ON ai_messages
+            BEGIN
+                DELETE FROM ai_turns WHERE message_id = old.id;
+            END;",
         )?;
         Ok(Self { conn: Mutex::new(conn) })
     }
@@ -278,6 +288,18 @@ impl AiStore for SqliteAiStore {
         let conn = self.conn()?;
         conn.execute("DELETE FROM ai_messages WHERE conversation_id IN (SELECT id FROM ai_conversations WHERE updated_at < ?1)", params![cutoff])?;
         Ok(conn.execute("DELETE FROM ai_conversations WHERE updated_at < ?1", params![cutoff])?)
+    }
+
+    fn put_turn(&self, message_id: &str, conversation_id: &str, json: &str) -> AppResult<()> {
+        self.conn()?.execute("INSERT INTO ai_turns (message_id, conversation_id, turn_json) VALUES (?1, ?2, ?3) ON CONFLICT(message_id) DO UPDATE SET turn_json=excluded.turn_json", params![message_id, conversation_id, json])?;
+        Ok(())
+    }
+
+    fn list_turns(&self, conversation_id: &str) -> AppResult<Vec<(String, String)>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT message_id, turn_json FROM ai_turns WHERE conversation_id=?1")?;
+        let rows = stmt.query_map(params![conversation_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     fn close_streaming_messages(&self) -> AppResult<usize> {

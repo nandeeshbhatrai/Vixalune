@@ -9,7 +9,10 @@ Added
 - AI gateway with bring-your-own-key for OpenAI, Anthropic, Google Gemini and OpenRouter (see docs/AI_GATEWAY.md). Keys are stored only in Windows Credential Manager and are never returned to the interface; if secure storage is unavailable, saving fails.
 - Settings → AI Providers (key, model, connection test, timeout/temperature/length, retention) and an AI Assistant screen (streaming, stop, retry, Markdown with code highlighting, conversation history).
 
+- Tool-aware assistant (see docs/ASSISTANT.md): recommendations grounded in the real tool registry with live installation status, a package vulnerability workflow using OSV and NVD (off until you allow it), explanation of scan-run output (only after you confirm what is sent), and strict validation of everything a model returns. Cards offer View Details, Check Prerequisites, Install and Prepare Scan, which use the existing confirmation flows.
+
 Known limitations
+- The tool-aware assistant's model-facing behavior is tested with scripted models only; OSV and NVD were verified live. Retrieval is lexical.
 - The four provider adapters are implemented against the documented APIs and tested against local mock servers; none has been verified with a real key by the project. Opt-in live tests are provided.
 - Prompts are sent to the cloud provider you choose and billed by it. The assistant cannot run commands.
 

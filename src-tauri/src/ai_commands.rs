@@ -118,3 +118,55 @@ pub fn ai_open_provider_page(state: State<'_, AppState>, provider: String, page:
     };
     state.links.open(url)
 }
+
+// ------------------------------------------------------------------ tool-aware assistant
+
+#[derive(serde::Serialize)]
+pub struct TurnEntry {
+    pub message_id: String,
+    pub turn: crate::domain::assistant::model::AssistantTurn,
+}
+
+/// Ask the tool-aware assistant. Retrieval, lookups and validation happen in the backend; the model only drafts text that is checked.
+#[tauri::command]
+pub async fn assistant_ask(app: AppHandle, state: State<'_, AppState>, input: SendInput) -> AppResult<SendAck> {
+    let assistant = state.assistant.clone();
+    assistant.ask(input, Arc::new(TauriAiEvents(app))).await
+}
+
+#[tauri::command]
+pub async fn assistant_retry(app: AppHandle, state: State<'_, AppState>, conversation_id: String, provider: String, model: String) -> AppResult<SendAck> {
+    let assistant = state.assistant.clone();
+    assistant.retry(&conversation_id, provider, model, Arc::new(TauriAiEvents(app))).await
+}
+
+/// `consent` must be true: it is the person's answer to "send part of this run's output to your AI provider?".
+#[tauri::command]
+pub async fn assistant_explain_run(app: AppHandle, state: State<'_, AppState>, conversation_id: String, run_id: String, consent: bool, provider: String, model: String) -> AppResult<SendAck> {
+    let assistant = state.assistant.clone();
+    assistant.explain_run(&conversation_id, &run_id, consent, provider, model, Arc::new(TauriAiEvents(app))).await
+}
+
+#[tauri::command]
+pub fn assistant_turns(state: State<'_, AppState>, conversation_id: String) -> AppResult<Vec<TurnEntry>> {
+    Ok(state.assistant.turns(&conversation_id)?.into_iter().map(|(message_id, turn)| TurnEntry { message_id, turn }).collect())
+}
+
+/// An action the person chose on a card. The backend validates and authorizes it again; installing and running are not actions.
+#[tauri::command]
+pub async fn assistant_run_action(state: State<'_, AppState>, action: crate::domain::assistant::actions::Action) -> AppResult<crate::adapters::assistant::executor::ActionOutcome> {
+    let assistant = state.assistant.clone();
+    assistant.run_action(action).await
+}
+
+/// Opens the web address of one piece of evidence of a stored answer. The address comes from the stored answer, never from the
+/// interface, and only https is opened.
+#[tauri::command]
+pub fn assistant_open_evidence(state: State<'_, AppState>, conversation_id: String, message_id: String, evidence_id: String) -> AppResult<()> {
+    let turn = state.assistant.turns(&conversation_id)?.into_iter().find(|t| t.0 == message_id).map(|t| t.1).ok_or_else(|| crate::domain::AppError::NotFound("that answer".into()))?;
+    let url = turn.evidence.iter().find(|e| e.id == evidence_id).and_then(|e| e.url.clone()).ok_or_else(|| crate::domain::AppError::NotFound("that source".into()))?;
+    if !url.starts_with("https://") {
+        return Err(crate::domain::AppError::Validation("only https addresses are opened".into()));
+    }
+    state.links.open(&url)
+}

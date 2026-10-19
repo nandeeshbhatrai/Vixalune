@@ -10,6 +10,8 @@ Vixalune can talk to a cloud AI provider using **your own API key**. This page c
 - **Costs are reported, never estimated.** Token counts and a dollar figure appear only when the provider returns them; otherwise the screen says "cost not reported by the provider".
 - **A failure never switches provider or model.** If a request fails, you see the error and decide what to do. Retry is a button.
 
+The tool-aware assistant built on this gateway is described in [ASSISTANT.md](ASSISTANT.md). Its one extra setting is **Allow vulnerability database lookups** (off by default).
+
 ## Where keys are stored
 
 Keys are stored in **Windows Credential Manager** (`keyring` crate, Windows native backend), under the service name `app.vixalune.desktop.ai`, one entry per provider, for the signed-in Windows user only. Windows protects the value with the user's credentials; Vixalune adds **no encryption of its own**.

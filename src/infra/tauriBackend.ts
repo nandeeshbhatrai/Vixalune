@@ -30,6 +30,8 @@ import type {
   AiSettings,
   AiStreamEvent,
   AiTestReport,
+  AssistantActionOutcome,
+  AssistantTurnEntry,
 } from "@/domain/types";
 
 /** Thin typed wrapper over Tauri IPC. No logic lives here. */
@@ -95,6 +97,12 @@ export const tauriBackend: Backend = {
   aiRetry: (conversationId, provider, model) => invoke<AiSendAck>("ai_retry", { conversationId, provider, model }),
   aiCancel: (requestId) => invoke<void>("ai_cancel", { requestId }),
   aiOpenProviderPage: (provider, page) => invoke<void>("ai_open_provider_page", { provider, page }),
+  assistantAsk: (input) => invoke<AiSendAck>("assistant_ask", { input }),
+  assistantRetry: (conversationId, provider, model) => invoke<AiSendAck>("assistant_retry", { conversationId, provider, model }),
+  assistantExplainRun: (conversationId, runId, consent, provider, model) => invoke<AiSendAck>("assistant_explain_run", { conversationId, runId, consent, provider, model }),
+  assistantTurns: (conversationId) => invoke<AssistantTurnEntry[]>("assistant_turns", { conversationId }),
+  assistantRunAction: (action) => invoke<AssistantActionOutcome>("assistant_run_action", { action }),
+  assistantOpenEvidence: (conversationId, messageId, evidenceId) => invoke<void>("assistant_open_evidence", { conversationId, messageId, evidenceId }),
   onAiEvent: async (handler) => {
     const unlisten = await listen<AiStreamEvent>("ai-stream", (e) => handler(e.payload));
     return unlisten;

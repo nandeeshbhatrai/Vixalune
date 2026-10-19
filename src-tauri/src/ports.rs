@@ -480,9 +480,40 @@ pub trait AiStore: Send + Sync {
     fn purge_conversations_before(&self, cutoff: &str) -> AppResult<usize>;
     /// After a restart nothing is streaming: any message still marked so was cut short.
     fn close_streaming_messages(&self) -> AppResult<usize>;
+
+    /// The structured form of an assistant answer, kept beside its message (and deleted with it).
+    fn put_turn(&self, message_id: &str, conversation_id: &str, json: &str) -> AppResult<()>;
+    /// `(message id, json)` for every structured answer in a conversation.
+    fn list_turns(&self, conversation_id: &str) -> AppResult<Vec<(String, String)>>;
 }
 
 /// Delivers streaming events to the user interface.
 pub trait AiEventSink: Send + Sync {
     fn emit(&self, event: crate::domain::ai::AiUiEvent);
+}
+
+// ------------------------------------------------------------------ tool-aware assistant
+
+/// Everything the assistant may know about the tools, through one narrow door. Implemented over the real registry, installer and
+/// runner; tests use a fake. There is no method that installs, runs or deletes anything.
+#[async_trait]
+pub trait ToolFacts: Send + Sync {
+    fn search(&self, query: &ToolQuery) -> Vec<CatalogEntry>;
+    fn entry(&self, id: &ToolId) -> AppResult<CatalogEntry>;
+    fn install_state(&self, id: &ToolId) -> Option<crate::domain::install_state::InstallState>;
+    fn installed(&self, id: &ToolId) -> Option<crate::domain::jobs::InstalledTool>;
+    async fn install_plan(&self, id: &ToolId) -> AppResult<InstallPlan>;
+    /// Validates and describes a run. Must not start anything.
+    async fn preview_run(&self, id: &ToolId, profile: &str, values: &HashMap<String, ParamValue>) -> AppResult<RunPreview>;
+    fn run_record(&self, run: OperationId) -> AppResult<crate::domain::runs::RunRecord>;
+    /// Stored output lines of a finished run, at most `max_lines`.
+    fn run_output(&self, run: OperationId, max_lines: usize) -> AppResult<Vec<String>>;
+}
+
+/// A public vulnerability database.
+#[async_trait]
+pub trait VulnSource: Send + Sync {
+    fn name(&self) -> &'static str;
+    async fn query_package(&self, q: &crate::domain::assistant::packages::PackageQuery, cancel: &CancellationToken) -> crate::domain::ai::AiResult<crate::domain::assistant::vuln::VulnLookup>;
+    async fn get_by_id(&self, id: &str, cancel: &CancellationToken) -> crate::domain::ai::AiResult<crate::domain::assistant::vuln::VulnLookup>;
 }

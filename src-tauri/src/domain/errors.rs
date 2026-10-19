@@ -28,6 +28,8 @@ pub enum AppError {
     Cancelled,
     #[error("{0}")]
     Busy(String),
+    #[error("approval required: {0}")]
+    ApprovalRequired(String),
     #[error("unsupported: {0}")]
     Unsupported(String),
     #[error("a required prerequisite is missing: {0}")]
@@ -60,6 +62,7 @@ impl AppError {
             Self::Cancelled => "cancelled",
             Self::NotImplemented(_) => "not_implemented",
             Self::Busy(_) => "busy",
+            Self::ApprovalRequired(_) => "approval_required",
             Self::Unsupported(_) => "unsupported",
             Self::PrerequisiteMissing(_) => "prerequisite_missing",
             Self::CommandFailed { .. } => "command_failed",
@@ -90,6 +93,7 @@ impl AppError {
             Self::Cancelled => "Nothing was changed. Start the operation again when ready.",
             Self::NotImplemented(_) => "This feature is planned for a later phase.",
             Self::Busy(_) => "Wait for the running operation to finish, or cancel it from Running Jobs, then try again.",
+            Self::ApprovalRequired(_) => "Nothing was done. Review the request in the application and approve it there if you want it to go ahead.",
             Self::Unsupported(_) => "This tool cannot be installed on this computer or with this version of Vixalune.",
             Self::PrerequisiteMissing(_) => "Install the missing prerequisite (see Dashboard > Setup issues), then retry.",
             Self::CommandFailed { .. } => "Open the job output for details, fix the cause, then retry.",

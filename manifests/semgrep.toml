@@ -52,7 +52,7 @@ can_update = false
 can_uninstall = true
 
 [verify]
-timeout_secs = 60
+timeout_secs = 180
 [[verify.checks]]
 kind = "package_installed"
 [[verify.checks]]

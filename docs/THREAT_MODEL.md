@@ -140,3 +140,12 @@ ZAP's command-line flags and install folder are unverified on real hardware.
 | Silent install or run | No such action exists; Install and Prepare Scan open the existing confirmation flows | None known |
 | Data leaving the computer | Lookups need consent and send only ecosystem/name/version; scan output needs a confirmation naming the provider, is bounded and credential-filtered | The provider sees what you ask and the catalog records used |
 | False reassurance from an empty result | Coverage notes always shown; safety claims flagged; not-assessed classes listed | Users may still over-trust |
+
+## Discover and community entries
+
+| Threat | Mitigation | Residual |
+|---|---|---|
+| Installing malware via a lookalike package | Results are labelled unreviewed; details (publisher, licence, version, installer hash) shown before adding; install needs a separate confirmation and shows the plan | The person can still choose a malicious package; winget's hash check does not prove safety |
+| A package description injects manifest fields (run profiles, other installers) | Values are escaped; manifest is parsed and validated; community entries are restricted to one winget install and no run profile, enforced again at load | None known |
+| A hand-edited file in the data folder elevates a community entry | Re-validated at every load: prefix, single winget method, no profiles/dependencies, file name equals id; reviewed ids cannot be replaced | Malware running as the user can still alter their own data folder |
+| Command injection through the search text or package id | Strict character validation; fixed argument array; no shell | None known |

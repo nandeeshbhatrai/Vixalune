@@ -1,0 +1,56 @@
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
+id = "mitmproxy"
+name = "mitmproxy"
+summary = "Interactive intercepting HTTP and HTTPS proxy for inspecting web traffic."
+description = "mitmproxy sits between a client and a server, letting you inspect and modify HTTP and HTTPS traffic. Use it only on traffic from applications and devices you own or are authorised to test, and note that decrypting HTTPS requires installing its certificate on the client. It has no guided run profile in Vixalune yet."
+category = "web_application"
+tags = ["proxy", "http", "traffic"]
+license = "MIT"
+homepage = "https://mitmproxy.org"
+documentation = "https://docs.mitmproxy.org/stable/"
+source_repository = "https://github.com/mitmproxy/mitmproxy"
+maintenance = "active"
+recommended_for_beginners = false
+platforms = ["windows_native"]
+
+[provenance]
+publisher = "mitmproxy"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (exe) and version (12.2.3) read from `winget show` on this date. Not installed or run on a test machine.
+verified_on = "2026-10-20"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs mitmproxy from the Windows Package Manager."
+
+[[install]]
+method = "winget"
+package_id = "mitmproxy.mitmproxy"
+
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog."
+
+[network]
+install = true
+run = false
+
+[privileges]
+install = "possible"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
+[verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

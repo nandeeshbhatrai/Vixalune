@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AsyncView } from "@/components/AsyncView";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
+import { DiscoverPanel } from "@/components/discover/DiscoverPanel";
 import { ToolCard } from "@/components/ToolCard";
 import { Button } from "@/components/ui/button";
 import { EMPTY_FILTERS, filterAndSort, hasActiveFilters, type CatalogFilters, type SortKey } from "@/domain/catalog";
@@ -26,6 +27,7 @@ export function Catalog() {
   const [filters, setFilters] = useState<CatalogFilters>(EMPTY_FILTERS);
   const [sort, setSort] = useState<SortKey>("name_asc");
   const searchRef = useRef<HTMLInputElement>(null);
+  const [view, setView] = useState<"catalog" | "discover">("catalog");
   const set = <K extends keyof CatalogFilters>(k: K, v: CatalogFilters[K]) => setFilters((f) => ({ ...f, [k]: v }));
 
   // "/" jumps to search, unless the user is already typing somewhere.
@@ -46,7 +48,25 @@ export function Catalog() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Tool Catalog" subtitle="Browse open-source security tools. Press / to search." />
+      <PageHeader title="Tool Catalog" subtitle="Browse reviewed open-source security tools, or discover more. Press / to search." />
+
+      <div role="tablist" aria-label="Catalog views" className="flex gap-2">
+        {(
+          [
+            ["catalog", "Catalog"],
+            ["discover", "Discover more tools"],
+          ] as const
+        ).map(([v, label]) => (
+          <button key={v} role="tab" type="button" aria-selected={view === v} onClick={() => setView(v)} className={`rounded-md border px-3 py-1.5 text-sm ${view === v ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-muted"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === "discover" ? (
+        <DiscoverPanel />
+      ) : (
+        <>
 
       <form role="search" aria-label="Filter tools" className="flex flex-wrap items-end gap-3" onSubmit={(e) => e.preventDefault()}>
         <Field label="Search">
@@ -142,6 +162,8 @@ export function Catalog() {
           </>
         )}
       </AsyncView>
+        </>
+      )}
     </div>
   );
 }

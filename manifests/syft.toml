@@ -1,0 +1,56 @@
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
+id = "syft"
+name = "Syft"
+summary = "Lists what software a container image or folder contains (SBOM generator)."
+description = "Syft generates a software bill of materials (SBOM) for container images and file systems, listing packages and versions. The SBOM can be checked for vulnerabilities with a scanner such as Grype. It has no guided run profile in Vixalune yet: Vixalune installs and verifies it, and you run it from a terminal."
+category = "utilities"
+tags = ["sbom", "containers", "inventory"]
+license = "Apache-2.0"
+homepage = "https://github.com/anchore/syft"
+documentation = "https://github.com/anchore/syft#readme"
+source_repository = "https://github.com/anchore/syft"
+maintenance = "active"
+recommended_for_beginners = false
+platforms = ["windows_native"]
+
+[provenance]
+publisher = "Anchore Inc"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (portable (zip)) and version (1.54.1) read from `winget show` on this date. Not installed or run on a test machine.
+verified_on = "2026-10-20"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs Syft from the Windows Package Manager."
+
+[[install]]
+method = "winget"
+package_id = "Anchore.Syft"
+
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog."
+
+[network]
+install = true
+run = false
+
+[privileges]
+install = "none"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
+[verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

@@ -1,6 +1,7 @@
 ﻿import { ArrowLeft } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { AsyncView } from "@/components/AsyncView";
+import { CommunityNotice } from "@/components/discover/CommunityNotice";
 import { ExternalLink } from "@/components/ExternalLink";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ToolActions } from "@/components/ToolActions";
@@ -51,6 +52,8 @@ export function ToolDetail() {
                   <p className="mt-1 text-muted-foreground">{m.summary}</p>
                 </div>
               </div>
+
+              <CommunityNotice entry={entry} />
 
               <Card>
                 <ToolActions entry={entry} />
@@ -132,7 +135,7 @@ export function ToolDetail() {
                     <div>
                       <dt className="text-xs text-muted-foreground">Catalog record</dt>
                       <dd>
-                        {entry.trust === "bundled" ? "Bundled with Vixalune" : "Unsigned remote record"}, revision {m.manifest_version}, maintained by {m.maintainer}
+                        {entry.trust === "bundled" ? "Bundled with Vixalune" : "Community entry added by you, not reviewed"}, revision {m.manifest_version}, maintained by {m.maintainer}
                       </dd>
                     </div>
                     <div>

@@ -1,0 +1,56 @@
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
+id = "autopsy"
+name = "Autopsy"
+summary = "Digital forensics platform for analysing disk images and recovering evidence."
+description = "Autopsy is a graphical digital forensics platform built on The Sleuth Kit. It analyses disk images and file systems. Use it only on evidence you are authorised to examine. It is a large install and has no guided run profile in Vixalune: open it from the Start menu after installing."
+category = "forensics"
+tags = ["forensics", "disk-images", "analysis"]
+license = "Apache-2.0"
+homepage = "https://www.autopsy.com/"
+documentation = "https://www.sleuthkit.org/autopsy/docs.php"
+source_repository = "https://github.com/sleuthkit/autopsy"
+maintenance = "active"
+recommended_for_beginners = false
+platforms = ["windows_native"]
+
+[provenance]
+publisher = "The Sleuth Kit"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (msi) and version (4.23.1) read from `winget show` on this date. Not installed or run on a test machine.
+verified_on = "2026-10-20"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs Autopsy from the Windows Package Manager."
+
+[[install]]
+method = "winget"
+package_id = "SleuthKit.Autopsy"
+
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog."
+
+[network]
+install = true
+run = false
+
+[privileges]
+install = "possible"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
+[verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

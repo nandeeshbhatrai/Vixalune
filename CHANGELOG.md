@@ -6,6 +6,7 @@ Application updates (this file) are separate from updates to the third-party too
 ## Unreleased
 
 Added
+- Discover: search the winget community repository from the Tool Catalog and add a package as a labelled, install-only community entry (not reviewed, no run profiles, never recommended by the AI Assistant). Seven more reviewed catalog entries: Gitleaks, OSV-Scanner, Grype, Syft, mitmproxy, Autopsy and Angry IP Scanner (validated against real `winget show` output; not yet installed or run on a test machine).
 - AI gateway with bring-your-own-key for OpenAI, Anthropic, Google Gemini and OpenRouter (see docs/AI_GATEWAY.md). Keys are stored only in Windows Credential Manager and are never returned to the interface; if secure storage is unavailable, saving fails.
 - Settings → AI Providers (key, model, connection test, timeout/temperature/length, retention) and an AI Assistant screen (streaming, stop, retry, Markdown with code highlighting, conversation history).
 

@@ -34,7 +34,7 @@ fn read_manifest(path: &Path) -> AppResult<(String, String)> {
 }
 
 pub struct ManifestRegistry {
-    entries: BTreeMap<ToolId, CatalogEntry>,
+    entries: std::sync::RwLock<BTreeMap<ToolId, CatalogEntry>>,
     pub rejected: Vec<AppError>,
 }
 
@@ -76,7 +76,7 @@ impl ManifestRegistry {
             entries.remove(&id);
             rejected.push(AppError::ManifestLoad { path: id.to_string(), message: "depends on a tool that is not in the catalog".into() });
         }
-        Ok(Self { entries, rejected })
+        Ok(Self { entries: std::sync::RwLock::new(entries), rejected })
     }
 }
 
@@ -85,9 +85,35 @@ impl ManifestRegistry {
     /// the application must still start and explain the problem.
     pub fn load_dir_or_empty(dir: &Path, trust: TrustLevel) -> Self {
         Self::load_dir(dir, trust).unwrap_or_else(|e| Self {
-            entries: BTreeMap::new(),
+            entries: std::sync::RwLock::new(BTreeMap::new()),
             rejected: vec![AppError::ManifestLoad { path: dir.display().to_string(), message: format!("the catalog folder could not be read: {e}") }],
         })
+    }
+}
+
+impl ManifestRegistry {
+    /// Add an entry while the application runs (a community entry the person chose to add). Never replaces an existing entry.
+    pub fn add_entry(&self, manifest: ToolManifest, trust: TrustLevel, digest: String) -> AppResult<CatalogEntry> {
+        let mut map = self.entries.write().unwrap();
+        if map.contains_key(&manifest.id) {
+            return Err(AppError::Validation(format!("'{}' is already in the catalog", manifest.id)));
+        }
+        let entry = CatalogEntry { manifest, trust, digest };
+        map.insert(entry.manifest.id.clone(), entry.clone());
+        Ok(entry)
+    }
+
+    /// Remove an entry that was added at run time. Reviewed (bundled) entries can never be removed this way.
+    pub fn remove_entry(&self, id: &ToolId) -> AppResult<()> {
+        let mut map = self.entries.write().unwrap();
+        match map.get(id) {
+            None => Err(AppError::NotFound(format!("tool '{id}'"))),
+            Some(e) if e.trust == TrustLevel::Bundled => Err(AppError::Validation("reviewed catalog entries cannot be removed".into())),
+            Some(_) => {
+                map.remove(id);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -95,6 +121,8 @@ impl ToolRegistry for ManifestRegistry {
     fn list(&self, query: &ToolQuery) -> Vec<CatalogEntry> {
         let needle = query.text.as_deref().map(str::to_lowercase).filter(|s| !s.is_empty());
         self.entries
+            .read()
+            .unwrap()
             .values()
             .filter(|e| query.category.is_none_or(|c| c == e.manifest.category))
             .filter(|e| match &needle {
@@ -111,7 +139,7 @@ impl ToolRegistry for ManifestRegistry {
     }
 
     fn get(&self, id: &ToolId) -> AppResult<CatalogEntry> {
-        self.entries.get(id).cloned().ok_or_else(|| AppError::NotFound(format!("tool '{id}'")))
+        self.entries.read().unwrap().get(id).cloned().ok_or_else(|| AppError::NotFound(format!("tool '{id}'")))
     }
 }
 
@@ -131,7 +159,7 @@ mod tests {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("manifests");
         let reg = ManifestRegistry::load_dir(&dir, TrustLevel::Bundled).unwrap();
         assert!(reg.rejected.is_empty(), "{:?}", reg.rejected);
-        assert_eq!(reg.list(&ToolQuery::default()).len(), 6);
+        assert_eq!(reg.list(&ToolQuery::default()).len(), 13);
     }
 
     #[test]

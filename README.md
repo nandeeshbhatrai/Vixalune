@@ -34,6 +34,10 @@ Full instructions, requirements, updating and uninstalling: [docs/INSTALLATION.m
 | [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) | How a release is made and tested, with the 0.2.0 test report |
 | [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/TOOL_MANIFEST_SCHEMA.md](docs/TOOL_MANIFEST_SCHEMA.md), [docs/MANUAL_INTEGRATION_TESTS.md](docs/MANUAL_INTEGRATION_TESTS.md) | Design and test documentation |
 
+## Finding more tools
+
+The catalog lists reviewed tools. **Discover more tools** searches the winget community repository; anything added from there is clearly labelled as not reviewed. See [docs/SUPPORTED_TOOLS.md](docs/SUPPORTED_TOOLS.md).
+
 ## AI assistant (optional)
 
 Bring your own key for OpenAI, Anthropic, Google Gemini or OpenRouter. Keys live only in Windows Credential Manager; messages are sent to the provider you choose. See [docs/AI_GATEWAY.md](docs/AI_GATEWAY.md). Privacy: [docs/PRIVACY.md](docs/PRIVACY.md). Security review and residual risks: [docs/AI_SECURITY.md](docs/AI_SECURITY.md). The assistant can also recommend tools from the catalog and look up known package vulnerabilities: [docs/ASSISTANT.md](docs/ASSISTANT.md).

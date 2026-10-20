@@ -26,6 +26,8 @@ pub mod system_net;
 #[cfg(test)]
 pub mod testing;
 pub mod unimplemented;
+pub mod community;
+pub mod discovery;
 pub mod winget;
 pub mod wsl;
 

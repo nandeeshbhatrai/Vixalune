@@ -540,6 +540,10 @@ export function createDemoBackend(): Backend {
     aiRetry: noAi,
     aiCancel: noAi,
     aiOpenProviderPage: noAi,
+    discoverSearch: noDiscover,
+    discoverDetails: noDiscover,
+    discoverAdd: noDiscover,
+    communityRemove: noDiscover,
     assistantAsk: noAi,
     assistantRetry: noAi,
     assistantExplainRun: noAi,
@@ -558,5 +562,13 @@ function noAi(): Promise<never> {
     code: "demo_ai",
     message: "AI providers are not available in the demonstration.",
     recovery: "Run the desktop app (npm run tauri:dev or the installed app) to add a provider and chat. Vixalune never shows invented AI answers.",
+  });
+}
+
+function noDiscover(): Promise<never> {
+  return Promise.reject({
+    code: "demo_discover",
+    message: "Searching the package repository is not available in the demonstration.",
+    recovery: "Run the desktop app to search the Windows Package Manager. Vixalune never shows invented search results.",
   });
 }

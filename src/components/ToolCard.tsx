@@ -23,6 +23,7 @@ export function ToolCard({ entry, status }: { entry: CatalogEntry; status: ToolS
         <StatusBadge status={status} />
       </div>
       <p className="flex-1 text-muted-foreground">{m.summary}</p>
+      {entry.trust !== "bundled" ? <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Community, not reviewed</p> : null}
       <div className="flex flex-wrap gap-1.5" aria-label="Platforms">
         {m.platforms.map((p) => (
           <Badge key={p}>{RUNTIME_LABEL[p]}</Badge>

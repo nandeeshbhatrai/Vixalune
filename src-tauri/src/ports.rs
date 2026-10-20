@@ -517,3 +517,12 @@ pub trait VulnSource: Send + Sync {
     async fn query_package(&self, q: &crate::domain::assistant::packages::PackageQuery, cancel: &CancellationToken) -> crate::domain::ai::AiResult<crate::domain::assistant::vuln::VulnLookup>;
     async fn get_by_id(&self, id: &str, cancel: &CancellationToken) -> crate::domain::ai::AiResult<crate::domain::assistant::vuln::VulnLookup>;
 }
+
+// ------------------------------------------------------------------ discovering packages beyond the reviewed catalog
+
+/// Searches a public package repository. Read-only: nothing is downloaded or installed.
+#[async_trait]
+pub trait PackageDiscovery: Send + Sync {
+    async fn search(&self, query: &str, cancel: &CancellationToken) -> AppResult<Vec<crate::domain::discover::DiscoveredPackage>>;
+    async fn details(&self, id: &str, cancel: &CancellationToken) -> AppResult<crate::domain::discover::DiscoveredDetails>;
+}

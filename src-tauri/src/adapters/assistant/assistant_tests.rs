@@ -185,14 +185,14 @@ async fn a_beginner_question_gets_recommendations_grounded_in_the_actual_catalog
     let h = harness().await;
     h.model.set_json(json!({
         "task_category": "network_traffic", "user_intent": "Inspect HTTP traffic",
-        "recommended_tools": [rec("zap", "primary"), rec("wireshark", "alternative")],
+        "recommended_tools": [rec("zap", "primary"), rec("mitmproxy", "alternative")],
         "answer": "ZAP sits between your browser and a site you are allowed to test and shows each request.",
         "next_steps": [{"label": "Look at the ZAP details", "tool_id": "zap"}]
     }));
     let (_, turn, ev) = ask(&h, "Which tool can inspect HTTP traffic?").await;
     assert_eq!(ev.deltas(), 0, "raw structured text is never streamed to the screen");
     assert_eq!(turn.kind, TurnKind::Recommendation);
-    assert_eq!(turn.recommendations.iter().map(|r| r.tool_id.as_str()).collect::<Vec<_>>(), ["zap", "wireshark"]);
+    assert_eq!(turn.recommendations.iter().map(|r| r.tool_id.as_str()).collect::<Vec<_>>(), ["zap", "mitmproxy"]);
     let zap = &turn.recommendations[0];
     assert_eq!(zap.role, RecRole::Primary);
     // Everything factual comes from the registry, not from the model.
@@ -241,7 +241,7 @@ async fn invented_tools_profiles_citations_and_links_are_rejected_and_reported()
         "task_category": "network_traffic",
         "recommended_tools": [
             rec("metasploit-pro", "primary"),
-            {"tool_id": "wireshark", "role": "alternative", "reasons": ["see https://evil.example/guide"], "profile_id": "no-such-profile", "evidence": ["E99"]},
+            {"tool_id": "mitmproxy", "role": "alternative", "reasons": ["see https://evil.example/guide"], "profile_id": "no-such-profile", "evidence": ["E99"]},
             rec("zap", "primary")
         ],
         "next_steps": [{"label": "Install it", "tool_id": "totally-made-up"}, {"label": "Read the guide"}],

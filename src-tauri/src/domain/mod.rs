@@ -4,6 +4,7 @@ pub mod activity;
 pub mod ai;
 pub mod assistant;
 pub mod container;
+pub mod discover;
 pub mod environment;
 pub mod errors;
 pub mod failure;

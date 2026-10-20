@@ -1,0 +1,56 @@
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
+id = "grype"
+name = "Grype"
+summary = "Vulnerability scanner for container images, file systems and software bills of materials."
+description = "Grype scans container images, directories and SBOMs for known vulnerabilities. On first use it downloads its vulnerability database. It has no guided run profile in Vixalune yet: Vixalune installs and verifies it, and you run it from a terminal."
+category = "vulnerability"
+tags = ["scanner", "containers", "sbom"]
+license = "Apache-2.0"
+homepage = "https://github.com/anchore/grype"
+documentation = "https://github.com/anchore/grype#readme"
+source_repository = "https://github.com/anchore/grype"
+maintenance = "active"
+recommended_for_beginners = false
+platforms = ["windows_native"]
+
+[provenance]
+publisher = "Anchore Inc"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (portable (zip)) and version (0.120.1) read from `winget show` on this date. Not installed or run on a test machine.
+verified_on = "2026-10-20"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs Grype from the Windows Package Manager."
+
+[[install]]
+method = "winget"
+package_id = "Anchore.Grype"
+
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog."
+
+[network]
+install = true
+run = true
+
+[privileges]
+install = "none"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
+[verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

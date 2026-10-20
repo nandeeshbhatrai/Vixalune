@@ -37,6 +37,8 @@
   AssistantAction,
   AssistantActionOutcome,
   AssistantTurnEntry,
+  DiscoveredDetails,
+  DiscoverResult,
 } from "./types";
 
 /**
@@ -135,6 +137,13 @@ export interface Backend {
   aiRetry(conversationId: string, provider: string, model: string): Promise<AiSendAck>;
   aiCancel(requestId: string): Promise<void>;
   aiOpenProviderPage(provider: string, page: "key" | "docs"): Promise<void>;
+  // Discover: search the winget community repository. Results are not reviewed; adding creates a labelled, install-only entry.
+  discoverSearch(query: string): Promise<DiscoverResult[]>;
+  discoverDetails(id: string): Promise<DiscoveredDetails>;
+  /** Adds the package to the catalog as a community entry. Installs nothing. */
+  discoverAdd(id: string): Promise<CatalogEntry>;
+  communityRemove(id: string): Promise<void>;
+
   // Tool-aware assistant: retrieval, lookups and validation happen in the backend.
   assistantAsk(input: AiSendInput): Promise<AiSendAck>;
   assistantRetry(conversationId: string, provider: string, model: string): Promise<AiSendAck>;

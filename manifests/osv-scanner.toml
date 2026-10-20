@@ -1,0 +1,56 @@
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
+id = "osv-scanner"
+name = "OSV-Scanner"
+summary = "Checks a project's dependencies against the OSV vulnerability database."
+description = "OSV-Scanner reads lock files and manifests in a project and reports dependencies with known vulnerabilities from the OSV database (osv.dev). It queries osv.dev over the internet. It has no guided run profile in Vixalune yet: Vixalune installs and verifies it, and you run it from a terminal."
+category = "vulnerability"
+tags = ["scanner", "dependencies", "osv"]
+license = "Apache-2.0"
+homepage = "https://github.com/google/osv-scanner"
+documentation = "https://google.github.io/osv-scanner/"
+source_repository = "https://github.com/google/osv-scanner"
+maintenance = "active"
+recommended_for_beginners = false
+platforms = ["windows_native"]
+
+[provenance]
+publisher = "Google"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (portable) and version (2.7.0) read from `winget show` on this date. Not installed or run on a test machine.
+verified_on = "2026-10-20"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs OSV-Scanner from the Windows Package Manager."
+
+[[install]]
+method = "winget"
+package_id = "Google.OSVScanner"
+
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog."
+
+[network]
+install = true
+run = true
+
+[privileges]
+install = "none"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
+[verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

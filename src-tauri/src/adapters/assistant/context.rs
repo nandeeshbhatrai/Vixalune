@@ -115,7 +115,8 @@ pub struct Retrieval {
 }
 
 pub fn retrieve(facts: &dyn ToolFacts, question: &str, earlier_user_messages: &[&str], limit: usize) -> Retrieval {
-    let entries = facts.search(&ToolQuery::default());
+    // Only reviewed catalog tools are recommended. Community entries (added from Discover) are unreviewed and have no run profiles.
+    let entries: Vec<_> = facts.search(&ToolQuery::default()).into_iter().filter(|e| e.trust == crate::ports::TrustLevel::Bundled).collect();
     let catalog_ids: Vec<String> = entries.iter().map(|e| e.manifest.id.as_str().to_string()).collect();
     let docs: Vec<Doc> = entries.iter().map(doc_for).collect();
     let n = entries.len().max(1) as f32;
@@ -146,6 +147,10 @@ pub fn retrieve(facts: &dyn ToolFacts, question: &str, earlier_user_messages: &[
             let idf = (1.0 + n / (1.0 + df)).ln();
             let field: f32 = d.fields.iter().filter(|(_, f)| f.contains(term)).map(|(fw, _)| *fw).fold(0.0, f32::max);
             s += w * idf * field;
+        }
+        // A tool Vixalune can run for the person (it has guided launch profiles) is more useful than one it can only install.
+        if !entries[i].manifest.launch_profiles.is_empty() {
+            s *= 1.35;
         }
         if mentioned(&entries[i], question) {
             s += 1000.0;
@@ -349,5 +354,24 @@ mod tests {
         for tool in ["nmap", "trivy", "semgrep", "wireshark", "zap", "nikto"] {
             assert!(!SYSTEM_RULES.to_lowercase().contains(tool), "{tool} must come from the registry, not the prompt");
         }
+    }
+}
+
+#[cfg(test)]
+mod community_tests {
+    use super::*;
+    use crate::adapters::assistant::test_support::FakeFacts;
+    use crate::domain::discover::{community_manifest_toml, DiscoveredDetails};
+
+    #[test]
+    fn unreviewed_community_entries_are_never_retrieved_for_recommendation() {
+        let f = FakeFacts::from_repo_manifests();
+        let d = DiscoveredDetails { id: "Vendor.Port-Scanner".into(), name: "Port Scanner Pro".into(), version: "1.0".into(), publisher: "Vendor".into(), description: "The best port scanner for network discovery and port scanning.".into(), ..Default::default() };
+        let (_, m) = community_manifest_toml(&d, "2026-10-20").unwrap();
+        f.registry().add_entry(m, crate::ports::TrustLevel::RemoteUnsigned, String::new()).unwrap();
+        assert!(f.search(&ToolQuery::default()).iter().any(|e| e.manifest.id.as_str() == "community-vendor-port-scanner"), "it is in the catalog");
+        let r = retrieve(&f, "port scanner for network discovery", &[], 5);
+        assert!(r.records.iter().all(|x| !x.id.starts_with("community-")), "{:?}", r.records.iter().map(|x| &x.id).collect::<Vec<_>>());
+        assert!(!r.catalog_ids.iter().any(|i| i.starts_with("community-")));
     }
 }

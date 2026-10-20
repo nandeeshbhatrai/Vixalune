@@ -10,6 +10,13 @@ Vixalune ships a small curated catalog. It installs each tool **from its publish
 | **Semgrep** | Find risky code patterns | Docker image `semgrep/semgrep`, pinned by digest | Container (Docker Desktop, Linux engine) | LGPL-2.1 (the program); the public rule registry has its own license | Yes: scan the practice project, a folder with your rules, or with registry rules |
 | **Wireshark** | Capture and inspect network traffic | winget package `WiresharkFoundation.Wireshark` | Windows | GPL-2.0-or-later | No (install and verify only; you start it from the Start menu) |
 | **Nikto** | Scan a web server for known problems | apt package `nikto` inside WSL 2 | WSL 2 (Ubuntu) | GPL-2.0-or-later | No (install and verify only) |
+| **Gitleaks** | Find hard-coded secrets in code and git history | winget package `Gitleaks.Gitleaks` | Windows | MIT | No (install and verify only; run it from a terminal) |
+| **OSV-Scanner** | Check a project's dependencies against the OSV database | winget package `Google.OSVScanner` | Windows | Apache-2.0 | No |
+| **Grype** | Scan container images and folders for known vulnerabilities | winget package `Anchore.Grype` | Windows | Apache-2.0 | No |
+| **Syft** | List what software an image or folder contains (SBOM) | winget package `Anchore.Syft` | Windows | Apache-2.0 | No |
+| **mitmproxy** | Inspect and modify HTTP/HTTPS traffic through a proxy | winget package `mitmproxy.mitmproxy` | Windows | MIT | No |
+| **Autopsy** | Digital forensics on disk images | winget package `SleuthKit.Autopsy` | Windows | Apache-2.0 | No |
+| **Angry IP Scanner** | Scan IP address ranges and ports (graphical) | winget package `angryziber.AngryIPScanner` | Windows | GPL-2.0 | No |
 
 ## Installation methods
 
@@ -37,6 +44,11 @@ Verification here means "run on a real Windows machine and observed", not "unit 
 | Semgrep | Image pull by digest, hardened verification run, scan of the practice project (3 findings, exit code 1 treated as findings) and image removal verified on Windows 11 with Docker Desktop |
 | Nmap, OWASP ZAP, Wireshark | Catalog entries validated; install and runs **not** verified on real hardware by the developers unless the release report says otherwise. The ZAP command-line flags and install folder are the least certain |
 | Nikto | Mock-tested only; not installed in a real WSL distribution |
+| Gitleaks, OSV-Scanner, Grype, Syft, mitmproxy, Autopsy, Angry IP Scanner | Added after reading each package's facts (id, version, publisher, licence, installer type) from the real `winget show` on 2026-10-20 and validating the manifests. **Not installed, run or uninstalled on a test machine.** They have no run profiles; the only check after installing is that winget reports the package as installed. Treat them as reviewed on paper, untested in practice |
+
+## Discover: packages that are not in the reviewed catalog
+
+The catalog's **Discover more tools** tab searches the winget community repository (thousands of packages). Anything you add from there becomes a **community entry**: it is labelled *Community, not reviewed*, it can only install one winget package (pinned to the version you were shown) and check that winget reports it as installed, it has no run profiles or dependencies, and the AI Assistant never recommends it. Adding installs nothing; installing is a separate confirmation. See [ASSISTANT.md](ASSISTANT.md) and [PRIVACY.md](PRIVACY.md) for what that means for the AI features and for what is sent where.
 
 ## Adding or changing tools
 

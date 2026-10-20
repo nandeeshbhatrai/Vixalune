@@ -32,6 +32,17 @@ A short welcome tour opens the first time. You can skip it; it never installs or
 
 Open the tool's page and choose **Install**. The dialog shows the method (winget, WSL apt or container image), whether administrator rights or a restart may be needed, the download size, prerequisites that are missing, and that installing accepts the package's license on your behalf. Confirm to start. Vixalune then **verifies** the tool by running it; a tool that fails verification is never shown as installed. You can cancel an install; a partly finished install is rolled back.
 
+## Finding more tools (Discover)
+
+The Tool Catalog has two views. **Catalog** lists the tools Vixalune's maintainers reviewed. **Discover more tools** searches the whole Windows Package Manager (winget) community repository.
+
+1. Type a word (for example `packet capture` or `forensics`) and press Search. Your search text goes to Microsoft's package service.
+2. Choose **Details…** on a result to see the publisher, licence, version and the installer hash the repository published.
+3. **Add to my catalog** creates a catalog entry labelled *Community, not reviewed*. This installs nothing.
+4. Open the entry and use **Install** as for any tool. You confirm the plan first, and the installer may ask for administrator rights.
+
+Community entries can be installed, verified and uninstalled from Vixalune, but Vixalune has not checked the software, offers no guided run for it, and the AI Assistant will not recommend it. **Remove from catalog** (after uninstalling) deletes the entry. Install only software from publishers you trust.
+
 ## Running a tool
 
 1. **Run a Tool**, choose the tool and what to run. The form starts with safe defaults pointing at your practice lab.

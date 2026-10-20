@@ -164,3 +164,33 @@ export type AssistantActionOutcome =
   | { kind: "prepared"; run: PreparedRun }
   | { kind: "scan_output"; excerpt: { lines: string[] } }
   | { kind: "vulnerabilities"; lookup: VulnLookupView };
+
+// Discover: packages beyond the reviewed catalog.
+export interface DiscoveredPackage {
+  id: string;
+  name: string;
+  version: string;
+  matched: string;
+}
+
+export interface DiscoveredDetails {
+  id: string;
+  name: string;
+  version: string;
+  publisher: string;
+  publisher_url: string;
+  homepage: string;
+  license: string;
+  license_url: string;
+  description: string;
+  tags: string[];
+  installer_type: string;
+  installer_url: string;
+  installer_sha256: string;
+}
+
+export interface DiscoverResult {
+  package: DiscoveredPackage;
+  in_catalog: string | null;
+  in_catalog_is_community: boolean;
+}

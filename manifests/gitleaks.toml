@@ -1,0 +1,56 @@
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
+id = "gitleaks"
+name = "Gitleaks"
+summary = "Finds hard-coded passwords, API keys and tokens in files and git history."
+description = "Gitleaks scans source code and git history for secrets such as passwords, API keys and tokens. Use it on repositories you own or are authorised to assess. It has no guided run profile in Vixalune yet: Vixalune installs and verifies it, and you run it from a terminal."
+category = "vulnerability"
+tags = ["secrets", "scanner", "git"]
+license = "MIT"
+homepage = "https://github.com/gitleaks/gitleaks"
+documentation = "https://github.com/gitleaks/gitleaks#readme"
+source_repository = "https://github.com/gitleaks/gitleaks"
+maintenance = "active"
+recommended_for_beginners = false
+platforms = ["windows_native"]
+
+[provenance]
+publisher = "Gitleaks LLC"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (portable (zip)) and version (8.30.1) read from `winget show` on this date. Not installed or run on a test machine.
+verified_on = "2026-10-20"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs Gitleaks from the Windows Package Manager."
+
+[[install]]
+method = "winget"
+package_id = "Gitleaks.Gitleaks"
+
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog."
+
+[network]
+install = true
+run = false
+
+[privileges]
+install = "none"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
+[verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

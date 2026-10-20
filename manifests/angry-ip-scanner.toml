@@ -1,0 +1,56 @@
+schema_version = 2
+manifest_version = "1.0.0"
+maintainer = "Vixalune catalog"
+id = "angry-ip-scanner"
+name = "Angry IP Scanner"
+summary = "Fast graphical scanner for IP addresses and ports."
+description = "Angry IP Scanner pings addresses and checks ports across a range. Scan only networks you own or are authorised to test. It is a graphical program with no guided run profile in Vixalune: open it from the Start menu after installing."
+category = "reconnaissance"
+tags = ["scanner", "network", "ports"]
+license = "GPL-2.0-only"
+homepage = "https://angryip.org/"
+documentation = "https://angryip.org/documentation/"
+source_repository = "https://github.com/angryip/ipscan"
+maintenance = "active"
+recommended_for_beginners = false
+platforms = ["windows_native"]
+
+[provenance]
+publisher = "Angry IP Scanner"
+basis = "package_repository"
+source_url = "https://github.com/microsoft/winget-pkgs"
+# Package id, installer type (nullsoft) and version (3.10.0) read from `winget show` on this date. Not installed or run on a test machine.
+verified_on = "2026-10-20"
+
+[windows]
+min_build = 19045
+architectures = ["x64"]
+
+[[prerequisites]]
+kind = "winget"
+reason = "Installs Angry IP Scanner from the Windows Package Manager."
+
+[[install]]
+method = "winget"
+package_id = "angryziber.AngryIPScanner"
+
+[integrity]
+level = "package_manager"
+note = "winget checks the installer SHA-256 from its catalog."
+
+[network]
+install = true
+run = true
+
+[privileges]
+install = "possible"
+run = "none"
+
+[lifecycle]
+can_update = true
+can_uninstall = true
+
+[verify]
+timeout_secs = 30
+[[verify.checks]]
+kind = "package_installed"

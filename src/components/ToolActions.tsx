@@ -206,7 +206,7 @@ export function ToolActions({ entry }: { entry: CatalogEntry }) {
         open={confirm === "install"}
         onOpenChange={(o) => !o && setConfirm(null)}
         title={`Install ${m.name}?`}
-        description="This is what will happen on your computer."
+        description={entry.trust === "bundled" ? "This is what will happen on your computer." : "This package was added from Discover and has not been reviewed by Vixalune. It runs the publisher's installer. This is what will happen on your computer."}
         confirmLabel="Install"
         busy={busy}
         confirmDisabled={plan.status !== "ready" || !plan.data || planBlocker !== null || (elevation === "required" && !elevationOk)}

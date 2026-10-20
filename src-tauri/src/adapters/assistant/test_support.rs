@@ -35,6 +35,10 @@ impl FakeFacts {
         Self { registry, states: Default::default(), versions: Default::default(), missing_prereqs: vec![], runs: Default::default(), previews: AtomicUsize::new(0), plans: AtomicUsize::new(0) }
     }
 
+    pub fn registry(&self) -> &ManifestRegistry {
+        &self.registry
+    }
+
     pub fn set_installed(&self, id: &str, version: &str) {
         self.states.lock().unwrap().insert(id.into(), InstallState::Installed);
         self.versions.lock().unwrap().insert(id.into(), version.into());

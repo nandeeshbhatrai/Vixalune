@@ -3,6 +3,7 @@
 
 pub mod adapters;
 pub mod ai_commands;
+pub mod discover_commands;
 pub mod commands;
 pub mod config;
 pub mod domain;
@@ -83,6 +84,12 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
     for r in &rejected {
         tracing::warn!("rejected manifest: {r}");
     }
+    // Packages the person added from Discover. Loaded after the reviewed catalog; reviewed ids can never be replaced.
+    let community_dir = data_dir.join("community");
+    for problem in adapters::community::CommunityCatalog::load_dir(&community_dir, &registry) {
+        tracing::warn!("community entry skipped: {problem}");
+        startup_notices.push(format!("A community catalog entry could not be used and was skipped: {problem}"));
+    }
     let registry = Arc::new(registry);
     // A damaged database is moved aside and replaced, never allowed to stop the application from starting.
     use adapters::sqlite_store::DatabaseCheck;
@@ -132,6 +139,15 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         store: store.clone(),
         activity: activity.clone(),
     });
+    let community = Arc::new(adapters::community::CommunityCatalog::new(
+        community_dir,
+        registry.clone(),
+        Arc::new(adapters::discovery::WingetDiscovery::new(executor.clone(), locator.clone())),
+        {
+            let engine = engine.clone();
+            Arc::new(move |id: &domain::ToolId| engine.state(id).map(|s| !matches!(s, domain::install_state::InstallState::NotInstalled | domain::install_state::InstallState::Cancelled | domain::install_state::InstallState::Failed)).unwrap_or(false))
+        },
+    ));
     for job in engine.recover()? {
         tracing::warn!("closed interrupted job {} for {}", job.id, job.tool_id);
     }
@@ -246,6 +262,7 @@ fn build_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>>
         startup_notices,
         ai,
         assistant,
+        community,
         config_path,
         config: std::sync::Mutex::new(config.clone()),
         data_dir_overridden,
@@ -333,6 +350,10 @@ pub fn run() {
             ai_commands::assistant_turns,
             ai_commands::assistant_run_action,
             ai_commands::assistant_open_evidence,
+            discover_commands::discover_search,
+            discover_commands::discover_details,
+            discover_commands::discover_add,
+            discover_commands::community_remove,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Vixalune")

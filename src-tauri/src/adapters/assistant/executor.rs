@@ -79,6 +79,8 @@ pub struct ScanExcerpt {
     pub lines: Vec<String>,
     pub total_lines: usize,
     pub withheld_lines: usize,
+    /// Values masked inside lines that were kept (passwords, tokens, private keys, access keys…). Best effort.
+    pub redacted_values: usize,
     pub truncated: bool,
     /// Vulnerability identifiers that appear in the output (upper-case). These are the only ones that can be called "scanner findings".
     pub scanner_ids: Vec<String>,
@@ -212,8 +214,12 @@ impl ActionExecutor {
         }
         let mut truncated = all.len() > MAX_SCAN_LINES;
         let mut lines = Vec::new();
-        let (mut withheld, mut chars) = (0usize, 0usize);
-        for l in all.iter().take(MAX_SCAN_LINES) {
+        let (mut withheld, mut chars, mut redacted) = (0usize, 0usize, 0usize);
+        // Multi-line secrets (private key blocks) are masked on the whole text first, then lines are examined one by one.
+        let (joined, n_block) = crate::domain::ai::redact_secrets_in_text(&all.iter().take(MAX_SCAN_LINES).cloned().collect::<Vec<_>>().join("\n"));
+        redacted += n_block;
+        for l in joined.split('\n') {
+            let l = &l.to_string();
             if crate::domain::ai::looks_like_credential(l) {
                 withheld += 1;
                 lines.push("[line withheld: it looks like a credential]".to_string());
@@ -227,6 +233,6 @@ impl ActionExecutor {
             lines.push(l.clone());
         }
         let scanner_ids = ids_in(&lines.join("\n")).into_iter().collect();
-        Ok(ScanExcerpt { run_id: run.to_string(), tool_id: rec.tool_id.as_str().to_string(), tool_name: rec.tool_name, profile_label: rec.profile_label, started_at: rec.started_at, total_lines: all.len(), lines, withheld_lines: withheld, truncated, scanner_ids })
+        Ok(ScanExcerpt { run_id: run.to_string(), tool_id: rec.tool_id.as_str().to_string(), tool_name: rec.tool_name, profile_label: rec.profile_label, started_at: rec.started_at, total_lines: all.len(), lines, withheld_lines: withheld, redacted_values: redacted, truncated, scanner_ids })
     }
 }

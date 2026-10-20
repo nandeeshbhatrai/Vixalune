@@ -83,7 +83,16 @@ impl AssistantService {
     /// Ask a question. Returns once the question has been accepted; a model answer arrives later as events and is stored when it
     /// ends. Missing details, refusals and missing consent are answered at once by the application.
     pub async fn ask(self: &Arc<Self>, input: SendInput, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
+        self.ai.ensure_cloud_allowed()?;
         self.ai.check_user_text(&input.text)?;
+        let (clean, redacted) = crate::domain::ai::redact_secrets_in_text(&input.text);
+        let input = SendInput { text: clean, ..input };
+        let mut ack = self.ask_clean(input, events).await?;
+        ack.redacted_values = ack.redacted_values.max(redacted);
+        Ok(ack)
+    }
+
+    async fn ask_clean(self: &Arc<Self>, input: SendInput, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
         let earlier_owned = self.earlier_user_texts(&input.conversation_id)?;
         let earlier: Vec<&str> = earlier_owned.iter().map(|s| s.as_str()).collect();
         let settings = self.settings()?;
@@ -165,8 +174,14 @@ impl AssistantService {
         if let Some(l) = &lookup {
             let ids = register_lookup_evidence(&mut evidence, l);
             known = known_ids(l);
-            let payload = serde_json::json!({"evidence_ids": ids, "lookup": l});
-            external.push((if l.source == "NVD" { "NVD" } else { "OSV" }, serde_json::to_string_pretty(&payload).unwrap_or_default()));
+            // The model needs identifiers, summaries, ranges, fixed versions and dates. Reference lists are shown to the person from the
+            // stored records and are not sent, which keeps the request small.
+            let mut slim = l.clone();
+            for r in &mut slim.records {
+                r.references.clear();
+            }
+            let payload = serde_json::json!({"evidence_ids": ids, "lookup": slim});
+            external.push((if l.source == "NVD" { "NVD" } else { "OSV" }, serde_json::to_string(&payload).unwrap_or_default()));
         }
         let fence = Fence::new();
         let system = build_system_prompt(&r.records, &tool_evidence);
@@ -190,6 +205,7 @@ impl AssistantService {
             return Err(AppError::ApprovalRequired("explaining a run sends part of its output to your AI provider; confirm that in the dialog first".into()));
         }
         let run = OperationId(uuid::Uuid::parse_str(run_id).map_err(|_| AppError::Validation("the run id is not valid".into()))?);
+        self.ai.ensure_cloud_allowed()?;
         self.ai.ready_for(&provider, &model)?;
         let excerpt = self.executor.scan_excerpt(run)?;
         let entry = self.facts.entry(&crate::domain::ToolId::new(excerpt.tool_id.clone())?)?;
@@ -201,7 +217,7 @@ impl AssistantService {
             format!("Output of the {} run “{}” ({})", excerpt.tool_name, excerpt.profile_label, excerpt.started_at),
             None,
             Some(excerpt.started_at.clone()),
-            Some(format!("{} line(s) shared, {} withheld", excerpt.lines.len(), excerpt.withheld_lines)),
+            Some(format!("{} line(s) shared; {} value(s) masked and {} line(s) withheld as credential-like", excerpt.lines.len(), excerpt.redacted_values, excerpt.withheld_lines)),
         );
         let ids: BTreeSet<String> = excerpt.scanner_ids.iter().cloned().collect();
         let mut sec = section(None, None);
@@ -221,14 +237,14 @@ impl AssistantService {
             vulnerability: Some(sec),
             kind: TurnKind::Vulnerability,
         };
-        let input = SendInput { conversation_id: conversation_id.to_string(), text: shown, provider, model };
+        let input = SendInput { conversation_id: conversation_id.to_string(), text: shown, provider, model, confirm_large: false };
         self.ai.send_prepared(input, Prepared { system: Some(system), model_user_text: Some(user), hide_deltas: true, finalizer: Some(Arc::new(fin)), title: None }, events)
     }
 
     /// Ask the last question again after a failed or stopped answer (an explicit user action).
     pub async fn retry(self: &Arc<Self>, conversation_id: &str, provider: String, model: String, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
         let text = self.ai.take_last_failed_question(conversation_id)?;
-        self.ask(SendInput { conversation_id: conversation_id.to_string(), text, provider, model }, events).await
+        self.ask(SendInput { conversation_id: conversation_id.to_string(), text, provider, model, confirm_large: false }, events).await
     }
 
     /// Structured answers of a conversation, keyed by the message they belong to.

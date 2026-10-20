@@ -34,7 +34,7 @@ impl OsvSource {
     }
 
     async fn get_json(&self, req: reqwest::RequestBuilder, cancel: &CancellationToken) -> AiResult<serde_json::Value> {
-        let none = Secret::new(String::new());
+        let none = Secret::none();
         let resp = http::send(req, &none, cancel, TIMEOUT, http::default_error_parser).await?;
         http::read_json(resp, &none, cancel, TIMEOUT, MAX_BODY).await
     }

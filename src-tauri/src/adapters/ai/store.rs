@@ -124,6 +124,27 @@ fn message_from_row(r: &rusqlite::Row<'_>) -> AppResult<StoredMessage> {
 
 const MSG_COLS: &str = "id, conversation_id, seq, role, content, status, error_code, error_message, provider, model, usage_json, created_at";
 
+#[cfg(test)]
+impl SqliteAiStore {
+    /// Every value of every table as text, for tests that prove something is *not* in the database.
+    pub fn dump_text(&self) -> String {
+        let conn = self.conn().unwrap();
+        let tables: Vec<String> = conn.prepare("SELECT name FROM sqlite_master WHERE type='table'").unwrap().query_map([], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect();
+        let mut out = String::new();
+        for t in tables {
+            out.push_str(&format!("[{t}]\n"));
+            let mut stmt = conn.prepare(&format!("SELECT * FROM {t}")).unwrap();
+            let n = stmt.column_count();
+            let rows = stmt.query_map([], |r| Ok((0..n).map(|i| format!("{:?}", r.get_ref(i).unwrap())).collect::<Vec<_>>().join("|"))).unwrap();
+            for row in rows.flatten() {
+                out.push_str(&row);
+                out.push('\n');
+            }
+        }
+        out
+    }
+}
+
 impl AiStore for SqliteAiStore {
     fn get_config(&self, provider: &str) -> AppResult<Option<ProviderConfig>> {
         let conn = self.conn()?;

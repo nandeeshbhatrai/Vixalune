@@ -11,7 +11,11 @@ Added
 
 - Tool-aware assistant (see docs/ASSISTANT.md): recommendations grounded in the real tool registry with live installation status, a package vulnerability workflow using OSV and NVD (off until you allow it), explanation of scan-run output (only after you confirm what is sent), and strict validation of everything a model returns. Cards offer View Details, Check Prerequisites, Install and Prepare Scan, which use the existing confirmation flows.
 
+- Security hardening of the AI features (docs/AI_SECURITY.md): local-only mode, request size limit, confirmation of large requests, per-session request limit, masking of secrets in pasted text and shared scan output, removal of local paths from provider error text, redacted panic messages, and a source-level check that only the AI service reads credentials.
+- Privacy documentation (docs/PRIVACY.md).
+
 Known limitations
+- Not production-ready: no AI provider has been verified live; see docs/AI_SECURITY.md for residual risks.
 - The tool-aware assistant's model-facing behavior is tested with scripted models only; OSV and NVD were verified live. Retrieval is lexical.
 - The four provider adapters are implemented against the documented APIs and tested against local mock servers; none has been verified with a real key by the project. Opt-in live tests are provided.
 - Prompts are sent to the cloud provider you choose and billed by it. The assistant cannot run commands.

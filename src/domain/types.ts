@@ -632,7 +632,10 @@ export type AiErrorKind =
   | "configuration"
   | "credential_store"
   | "protocol"
-  | "too_large";
+  | "too_large"
+  | "local_only"
+  | "limit_reached"
+  | "needs_confirmation";
 
 export interface AiErrorInfo {
   code: string;
@@ -656,12 +659,20 @@ export interface AiSettings {
   history_days: number;
   /** The person agreed that package names and versions may be sent to OSV and NVD. */
   allow_vulnerability_lookup: boolean;
+  /** No cloud AI request is made at all. */
+  local_only: boolean;
+  max_request_chars: number;
+  /** Requests above this size need confirmation (0 = never ask). */
+  confirm_large_chars: number;
+  /** 0 = no limit. */
+  session_request_limit: number;
 }
 
 export interface AiOverview {
   providers: AiProviderView[];
   credential_backend: string;
   settings: AiSettings;
+  session: { requests_used: number; limit: number };
 }
 
 export interface AiModelInfo {
@@ -734,6 +745,8 @@ export interface AiSendInput {
   text: string;
   provider: string;
   model: string;
+  /** The person confirmed sending a request larger than their confirmation size. */
+  confirm_large?: boolean;
 }
 
 export interface AiSendAck {
@@ -741,6 +754,8 @@ export interface AiSendAck {
   conversation_id: string;
   user_message: AiMessage;
   assistant_message_id: string;
+  /** Values that looked like secrets and were masked in the typed text before it was stored or sent. */
+  redacted_values?: number;
 }
 
 export type AiStreamEvent = { request_id: string; conversation_id: string; message_id: string } & (

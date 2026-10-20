@@ -17,7 +17,7 @@ use crate::domain::{AppError, AppResult};
 use crate::ports::{AiEventSink, AiProvider, AiStore, CredentialStore, StreamSink};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -97,11 +97,20 @@ pub struct ProviderView {
     pub credential_error: Option<AiErrorDto>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionUsage {
+    /// Requests sent to providers since Vixalune started (chat requests and connection-test requests; automatic retries are not counted).
+    pub requests_used: u32,
+    /// 0 = no limit.
+    pub limit: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProvidersOverview {
     pub providers: Vec<ProviderView>,
     pub credential_backend: String,
     pub settings: AiSettings,
+    pub session: SessionUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -134,6 +143,9 @@ pub struct SendInput {
     pub text: String,
     pub provider: String,
     pub model: String,
+    /// The person confirmed sending a request that is larger than their confirmation threshold.
+    #[serde(default)]
+    pub confirm_large: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -142,6 +154,10 @@ pub struct SendAck {
     pub conversation_id: String,
     pub user_message: StoredMessage,
     pub assistant_message_id: String,
+    /// Values in the typed text that looked like secrets (passwords, tokens, private keys…) and were masked before the text was
+    /// stored or sent.
+    #[serde(default)]
+    pub redacted_values: usize,
 }
 
 fn now() -> String {
@@ -161,6 +177,7 @@ pub struct AiService {
     backoff: Backoff,
     running: Mutex<HashMap<String, (String, CancellationToken)>>,
     models: Mutex<HashMap<String, (Instant, Vec<ModelInfo>)>>,
+    session_requests: AtomicU32,
 }
 
 /// Forwards provider events to the interface and remembers whether any text has arrived (which ends the right to retry).
@@ -224,7 +241,29 @@ impl AiService {
     }
 
     pub fn with_backoff(registry: Arc<ProviderRegistry>, creds: Arc<dyn CredentialStore>, store: Arc<dyn AiStore>, backoff: Backoff) -> Arc<Self> {
-        Arc::new(Self { registry, creds, store, backoff, running: Mutex::new(HashMap::new()), models: Mutex::new(HashMap::new()) })
+        Arc::new(Self { registry, creds, store, backoff, running: Mutex::new(HashMap::new()), models: Mutex::new(HashMap::new()), session_requests: AtomicU32::new(0) })
+    }
+
+    /// Local-only mode: refuse anything that would contact a cloud AI provider.
+    pub fn ensure_cloud_allowed(&self) -> AppResult<()> {
+        if self.store.get_settings()?.local_only {
+            return Err(AppError::Ai(AiError::new(AiErrorKind::LocalOnly, "local-only mode is on, so no request was sent to an AI provider")));
+        }
+        Ok(())
+    }
+
+    /// Count one billable request against the per-session limit, or refuse it.
+    fn reserve_request(&self, settings: &AiSettings) -> AppResult<()> {
+        if settings.session_request_limit == 0 {
+            self.session_requests.fetch_add(1, Ordering::SeqCst);
+            return Ok(());
+        }
+        let used = self.session_requests.fetch_add(1, Ordering::SeqCst);
+        if used >= settings.session_request_limit {
+            self.session_requests.fetch_sub(1, Ordering::SeqCst);
+            return Err(AppError::Ai(AiError::new(AiErrorKind::LimitReached, format!("the limit of {} requests per session has been reached", settings.session_request_limit))));
+        }
+        Ok(())
     }
 
     fn provider(&self, id: &str) -> AppResult<Arc<dyn AiProvider>> {
@@ -257,7 +296,9 @@ impl AiService {
         for d in self.registry.descriptors() {
             providers.push(self.view(&d, active.as_deref())?);
         }
-        Ok(ProvidersOverview { providers, credential_backend: self.creds.backend_name().to_string(), settings: self.store.get_settings()? })
+        let settings = self.store.get_settings()?;
+        let session = SessionUsage { requests_used: self.session_requests.load(Ordering::SeqCst), limit: settings.session_request_limit };
+        Ok(ProvidersOverview { providers, credential_backend: self.creds.backend_name().to_string(), settings, session })
     }
 
     fn view(&self, d: &ProviderDescriptor, active: Option<&str>) -> AppResult<ProviderView> {
@@ -370,6 +411,9 @@ impl AiService {
 
     pub async fn list_models(&self, provider: &str) -> AppResult<ModelList> {
         let p = self.provider(provider)?;
+        if p.descriptor().capabilities.model_listing {
+            self.ensure_cloud_allowed()?;
+        }
         let verified = self.store.get_status(provider)?.verified_models;
         let cfg = self.config_or_default(provider)?;
         if !p.descriptor().capabilities.model_listing {
@@ -442,6 +486,7 @@ impl AiService {
     /// Test the saved key against the provider. Success is reported only for what was actually proven:
     /// the key was accepted by an authenticated request; and, when a model is given, a real one-line request with that model worked.
     pub async fn test_connection(&self, provider: &str, model: Option<String>) -> AppResult<TestReport> {
+        self.ensure_cloud_allowed()?;
         let p = self.provider(provider)?;
         let key = self.key(provider)?;
         let cfg = self.config_or_default(provider)?;
@@ -482,6 +527,7 @@ impl AiService {
                     return Err(AppError::Ai(AiError::new(AiErrorKind::ModelNotFound, "choose a valid model name")));
                 }
                 let req = ChatRequest { model: m.clone(), system: None, messages: vec![ChatMessage::user(TEST_PROMPT)], tools: vec![], params: GenerationParams { temperature: None, max_output_tokens: Some(16) }, idle_timeout_secs: cfg.timeout_secs };
+                self.reserve_request(&self.store.get_settings()?)?;
                 let mut tries = 0;
                 let result = loop {
                     let r = p.chat_stream(&key, &req, &cfg, &NullSink, &cancel).await;
@@ -616,7 +662,7 @@ impl AiService {
         Ok(())
     }
 
-    fn build_request(&self, history: &[StoredMessage], new_user: &ChatMessage, model: &str, cfg: &ProviderConfig, system: &str) -> ChatRequest {
+    fn build_request(&self, history: &[StoredMessage], new_user: &ChatMessage, model: &str, cfg: &ProviderConfig, system: &str, max_chars: usize) -> ChatRequest {
         let mut msgs: Vec<ChatMessage> = history
             .iter()
             .filter(|m| m.status == MessageStatus::Complete && !m.content.trim().is_empty() && matches!(m.role, Role::User | Role::Assistant))
@@ -625,7 +671,7 @@ impl AiService {
         msgs.push(new_user.clone());
         // Keep the conversation within the size bound by dropping the oldest messages; start on a user turn.
         let mut total: usize = msgs.iter().map(|m| m.content.chars().count()).sum::<usize>() + system.len();
-        while total > MAX_CONTEXT_CHARS && msgs.len() > 1 {
+        while total > max_chars.min(MAX_CONTEXT_CHARS) && msgs.len() > 1 {
             total -= msgs.remove(0).content.chars().count();
         }
         while msgs.len() > 1 && msgs[0].role != Role::User {
@@ -652,10 +698,15 @@ impl AiService {
     }
 
     /// Like `send_message`, with the system prompt, the model-visible text and the finalizer supplied by the caller.
-    pub fn send_prepared(self: &Arc<Self>, input: SendInput, prep: Prepared, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
+    pub fn send_prepared(self: &Arc<Self>, mut input: SendInput, prep: Prepared, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
+        self.ensure_cloud_allowed()?;
         let provider = self.provider(&input.provider)?;
         let key = self.key(&input.provider)?;
         self.check_message_text(&input.text, &key)?;
+        // Pasted output may carry secrets (passwords, tokens, private keys). They are masked before the text is stored or sent.
+        let (clean, redacted_values) = redact_secrets_in_text(&input.text);
+        input.text = clean;
+        let settings = self.store.get_settings()?;
         let cfg = self.config_or_default(&input.provider)?;
         ai(provider.validate_config(&cfg))?;
         self.require_usable_model(&input.provider, &input.model)?;
@@ -672,8 +723,17 @@ impl AiService {
         let history = self.store.list_messages(&conversation.id)?;
         let new_user = ChatMessage::user(prep.model_user_text.clone().unwrap_or_else(|| input.text.clone()));
         let system = prep.system.clone().unwrap_or_else(|| SYSTEM_PROMPT.to_string());
-        let request = self.build_request(&history, &new_user, &input.model, &cfg, &system);
+        let request = self.build_request(&history, &new_user, &input.model, &cfg, &system, settings.max_request_chars as usize);
         ai(provider.validate_request(&request))?;
+        // Request size controls, before anything is stored or sent.
+        let size: usize = request.messages.iter().map(|m| m.content.chars().count()).sum::<usize>() + request.system.as_deref().map_or(0, |s| s.chars().count());
+        if size > settings.max_request_chars as usize {
+            return Err(AppError::Ai(AiError::new(AiErrorKind::TooLarge, format!("this request is about {size} characters, more than the {} you allow in Settings, AI Providers", settings.max_request_chars))));
+        }
+        if settings.confirm_large_chars > 0 && size > settings.confirm_large_chars as usize && !input.confirm_large {
+            return Err(AppError::Ai(AiError::new(AiErrorKind::NeedsConfirmation, format!("this request is large: about {size} characters (roughly {} tokens) will be sent to {} and may cost more than usual", size / 4, provider.descriptor().display_name))));
+        }
+        self.reserve_request(&settings)?;
 
         let t = now();
         let user_message = self.store.append_message(&StoredMessage { id: uuid::Uuid::new_v4().to_string(), conversation_id: conversation.id.clone(), seq: 0, role: Role::User, content: input.text.clone(), status: MessageStatus::Complete, error_code: None, error_message: None, provider: None, model: None, usage: None, created_at: t.clone() })?;
@@ -690,7 +750,7 @@ impl AiService {
         let request_id = uuid::Uuid::new_v4().to_string();
         let cancel = CancellationToken::new();
         self.running.lock().unwrap().insert(request_id.clone(), (conv.id.clone(), cancel.clone()));
-        let ack = SendAck { request_id: request_id.clone(), conversation_id: conv.id.clone(), user_message, assistant_message_id: assistant.id.clone() };
+        let ack = SendAck { request_id: request_id.clone(), conversation_id: conv.id.clone(), user_message, assistant_message_id: assistant.id.clone(), redacted_values };
 
         let me = self.clone();
         let sink = Arc::new(ServiceSink { events, store: self.store.clone(), request_id: request_id.clone(), conversation_id: conv.id.clone(), message_id: assistant.id.clone(), text_seen: AtomicBool::new(false), message: Mutex::new(assistant.clone()), last_flush: Mutex::new(Instant::now()), hide_deltas: prep.hide_deltas });
@@ -785,7 +845,7 @@ impl AiService {
     /// Re-send the last user message after a failed, stopped or interrupted answer. This is always an explicit user action.
     pub fn retry_last(self: &Arc<Self>, conversation_id: &str, provider: String, model: String, events: Arc<dyn AiEventSink>) -> AppResult<SendAck> {
         let text = self.take_last_failed_question(conversation_id)?;
-        self.send_message(SendInput { conversation_id: conversation_id.to_string(), text, provider, model }, events)
+        self.send_message(SendInput { conversation_id: conversation_id.to_string(), text, provider, model, confirm_large: false }, events)
     }
 
     /// Remove the last failed, stopped or cut-off answer and the question it answered; return the question's text so it can be asked
@@ -822,7 +882,7 @@ impl AiService {
         let request_id = uuid::Uuid::new_v4().to_string();
         let ev = |kind| AiUiEvent { request_id: request_id.clone(), conversation_id: conv.id.clone(), message_id: assistant.id.clone(), kind };
         events.emit(ev(AiUiEventKind::Finished { status: MessageStatus::Complete, finish_reason: None, usage: Usage::default(), error: None }));
-        Ok(SendAck { request_id, conversation_id: conv.id, user_message, assistant_message_id: assistant.id })
+        Ok(SendAck { request_id, conversation_id: conv.id, user_message, assistant_message_id: assistant.id, redacted_values: 0 })
     }
 
     pub fn turns(&self, conversation_id: &str) -> AppResult<Vec<(String, String)>> {

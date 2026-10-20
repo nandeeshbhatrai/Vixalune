@@ -132,3 +132,7 @@ Dependency checks run for this review (results on this machine at the time of wr
 ## 7. Recommended next steps (not done)
 
 Sign manifests and verify them at load; add a recurring dependency check in CI (`cargo audit`/`cargo deny`, `npm audit`, SBOM); verify image signatures where publishers provide them; add profile-level memory limits and a restricted token for native runs; implement update review and rollback; code-sign release builds; fuzz the manifest and target parsers; add a Tauri-window end-to-end test.
+
+## AI features (Phase 10)
+
+The AI gateway, credential handling and the tool-aware assistant were reviewed separately; see [AI_SECURITY.md](AI_SECURITY.md) for the requirement-by-requirement controls, the test map, the findings fixed, and the residual risks. The verdict there is that the AI features are **not yet production-ready**.

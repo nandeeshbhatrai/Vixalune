@@ -35,6 +35,8 @@ export function AssistantPage() {
   const [draft, setDraft] = useState("");
   const [live, setLive] = useState<Live | null>(null);
   const [busyAsk, setBusyAsk] = useState(false);
+  const [largeAsk, setLargeAsk] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<AiErrorInfo | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [useCatalog, setUseCatalog] = useState(true);
@@ -152,18 +154,19 @@ export function AssistantPage() {
     }
   };
 
-  const send = async () => {
+  const send = async (confirmLarge = false) => {
     const text = draft.trim();
     if (!text || streaming) return;
     setError(null);
     const conv = currentId ? { id: currentId } : await newConversation();
     if (!conv) return;
     try {
-      const input = { conversation_id: conv.id, text, provider, model };
+      const input = { conversation_id: conv.id, text, provider, model, confirm_large: confirmLarge };
       currentRef.current = conv.id;
       setBusyAsk(true);
       const ack = await (useCatalog ? backend.assistantAsk(input) : backend.aiSendMessage(input));
       setDraft("");
+      setNotice(ack.redacted_values ? `${ack.redacted_values} value(s) in your message looked like secrets (passwords, tokens or keys) and were masked before the message was stored or sent.` : null);
       if (finishedRef.current.has(ack.request_id)) {
         await loadConversation(conv.id);
         await refreshList();
@@ -172,7 +175,9 @@ export function AssistantPage() {
         setLive({ requestId: ack.request_id, messageId: ack.assistant_message_id, text: "", retrying: null });
       }
     } catch (e) {
-      fail(e);
+      const err = toAppError(e);
+      if (err.code === "ai_needs_confirmation") setLargeAsk(err.message);
+      else fail(e);
     } finally {
       setBusyAsk(false);
     }
@@ -277,7 +282,8 @@ export function AssistantPage() {
   const configured = overview.providers.filter((p) => p.has_key);
   const last = messages[messages.length - 1];
   const canRetry = !streaming && last && last.role === "assistant" && last.status !== "complete";
-  const canSend = !!draft.trim() && !!provider && !!model && !streaming;
+  const localOnly = overview.settings.local_only;
+  const canSend = !!draft.trim() && !!provider && !!model && !streaming && !localOnly;
 
   return (
     <div className="flex h-full flex-col">
@@ -286,6 +292,16 @@ export function AssistantPage() {
         What you type here is sent to {providerView?.descriptor.display_name ?? "your chosen provider"} over the internet, and the provider may bill your account. Do not paste secrets, credentials or data you are not allowed to share.
         Vixalune adds nothing else: no keys, environment variables, files or command output.
       </p>
+      {localOnly ? (
+        <div role="status" aria-label="Local-only mode" className="mb-3 rounded-md border border-amber-500/60 p-3 text-sm">
+          <p className="font-medium">Local-only mode is on. Nothing is sent to an AI provider.</p>
+          <p className="mt-1">The assistant, scan explanations and vulnerability lookups are unavailable. The tool catalog, installing, running tools and your saved conversations still work. <Link className="text-primary underline" to="/settings/ai">Turn it off in Settings</Link> to use the assistant. This does not stop installers, scanners or other tools from using the network.</p>
+        </div>
+      ) : (
+        <p aria-label="What is shared" className="mb-3 text-xs text-muted-foreground">
+          Goes to {providerView?.descriptor.display_name ?? "your provider"} with each question: your message, the conversation so far, and the catalog records of the tools considered. Not shared: files, project folders, scan output or credentials{useCatalog ? " — unless you press “Explain a scan run” and confirm" : ""}. Requests this session: {overview.session.requests_used}{overview.session.limit ? ` of ${overview.session.limit}` : ""}.
+        </p>
+      )}
       {configured.length === 0 ? (
         <EmptyState icon={Bot} title="No AI provider is set up">
           Add a provider and an API key in <Link className="text-primary underline" to="/settings/ai">Settings → AI Providers</Link> to start.
@@ -353,6 +369,7 @@ export function AssistantPage() {
                       {m.status !== "complete" ? <span className="font-medium text-destructive">{m.status === "cancelled" ? "Stopped" : m.status === "interrupted" ? "Interrupted — partial answer" : "Failed"}{m.error_message ? `: ${m.error_message}` : ""}</span> : null}
                       {formatTokens(m.usage) ? <span>{formatTokens(m.usage)}</span> : null}
                       <span>{formatCost(m.usage)}</span>
+                      {!m.usage && m.status === "complete" && m.provider ? <span className="font-medium text-amber-700 dark:text-amber-300">The provider did not report usage, so the size and cost of this request are unknown.</span> : null}
                       {m.content && !turns[m.id] ? <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => copy(m.content)}><Copy size={12} aria-hidden /> Copy response</button> : null}
                     </div>
                   ) : null}
@@ -366,6 +383,7 @@ export function AssistantPage() {
               ) : null}
             </div>
 
+            {notice ? <p role="status" className="mt-2 rounded-md border border-amber-500/60 p-2 text-xs">{notice}</p> : null}
             {error ? <div className="mt-2"><ErrorNotice error={error} /></div> : null}
 
             <div className="mt-2 flex items-end gap-2">
@@ -386,6 +404,17 @@ export function AssistantPage() {
           </section>
         </div>
       )}
+      <ConfirmDialog
+        open={largeAsk !== null}
+        onOpenChange={(o) => !o && setLargeAsk(null)}
+        title="Send a large request?"
+        description={largeAsk ?? ""}
+        confirmLabel="Send anyway"
+        onConfirm={() => {
+          setLargeAsk(null);
+          void send(true);
+        }}
+      />
       <ConfirmDialog
         open={explainOpen}
         onOpenChange={setExplainOpen}

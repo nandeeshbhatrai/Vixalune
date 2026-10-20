@@ -273,6 +273,10 @@ function Panels({ initial }: { initial: AiOverview }) {
   const [days, setDays] = useState(String(overview.settings.history_days));
   const [saved, setSaved] = useState(false);
   const [lookup, setLookup] = useState(overview.settings.allow_vulnerability_lookup);
+  const [localOnly, setLocalOnly] = useState(overview.settings.local_only);
+  const [maxChars, setMaxChars] = useState(String(overview.settings.max_request_chars));
+  const [confirmChars, setConfirmChars] = useState(String(overview.settings.confirm_large_chars));
+  const [sessionLimit, setSessionLimit] = useState(String(overview.settings.session_request_limit));
   const view = overview.providers.find((p) => p.descriptor.id === selected) ?? overview.providers[0];
   const unavailable = overview.providers.find((p) => p.credential_error)?.credential_error;
 
@@ -304,6 +308,34 @@ function Panels({ initial }: { initial: AiOverview }) {
       </div>
       {view ? <ProviderPanel key={view.descriptor.id} view={view} onChanged={reload} /> : null}
 
+      <Card role="region" aria-label="Privacy and cost controls">
+        <CardTitle>Privacy and cost controls</CardTitle>
+        <label className="flex items-start gap-2">
+          <input type="checkbox" className="mt-1" checked={localOnly} onChange={(e) => setLocalOnly(e.target.checked)} />
+          <span>
+            <strong>Local-only mode.</strong> No request is sent to any AI provider and no package is looked up in a vulnerability database. Unavailable while it is on: the AI Assistant, connection tests and model lists, vulnerability lookups, scan explanations. Still available: the tool catalog, installing, running tools, learning labs, your saved conversations.
+            This is not a promise that Vixalune makes no network connections: package managers (winget), container engines, scanners that download their databases, and the tools you run can still use the network.
+          </span>
+        </label>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div>
+            <label htmlFor="ai-max" className="mb-1 block font-medium">Largest request (characters)</label>
+            <input id="ai-max" type="number" min={2000} max={200000} className={fieldClass} value={maxChars} onChange={(e) => setMaxChars(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="ai-confirm" className="mb-1 block font-medium">Ask before sending more than (characters, 0 = never ask)</label>
+            <input id="ai-confirm" type="number" min={0} max={200000} className={fieldClass} value={confirmChars} onChange={(e) => setConfirmChars(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="ai-session" className="mb-1 block font-medium">Requests per session (0 = no limit)</label>
+            <input id="ai-session" type="number" min={0} max={100000} className={fieldClass} value={sessionLimit} onChange={(e) => setSessionLimit(e.target.value)} />
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="session-usage">
+          Requests sent this session: {overview.session.requests_used}{overview.session.limit ? ` of ${overview.session.limit}` : " (no limit set)"}. Each response is limited by its maximum length (set per provider above). Providers report token usage when they can; Vixalune never estimates a price, so a cost is shown only when the provider reports one. Automatic retries (at most 3 attempts, only before text arrives) are not counted.
+        </p>
+      </Card>
+
       <Card>
         <CardTitle>Conversation history</CardTitle>
         <label htmlFor="ai-days" className="mb-1 block font-medium">
@@ -314,7 +346,7 @@ function Panels({ initial }: { initial: AiOverview }) {
           <Button
             onClick={async () => {
               setSaved(false);
-              if (await run(() => backend.aiUpdateSettings({ history_days: Number(days), allow_vulnerability_lookup: lookup }))) {
+              if (await run(() => backend.aiUpdateSettings({ history_days: Number(days), allow_vulnerability_lookup: lookup, local_only: localOnly, max_request_chars: Number(maxChars), confirm_large_chars: Number(confirmChars), session_request_limit: Number(sessionLimit) }))) {
                 setSaved(true);
                 reload();
               }

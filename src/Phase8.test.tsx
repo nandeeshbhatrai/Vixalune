@@ -31,7 +31,7 @@ function provider(over: Partial<AiProviderView> = {}, id = "openai"): AiProvider
 }
 
 function overview(providers: AiProviderView[]): AiOverview {
-  return { providers, credential_backend: "Windows Credential Manager (protected for your Windows account)", settings: { history_days: 30, allow_vulnerability_lookup: false } };
+  return { providers, credential_backend: "Windows Credential Manager (protected for your Windows account)", settings: { history_days: 30, allow_vulnerability_lookup: false, local_only: false, max_request_chars: 200000, confirm_large_chars: 60000, session_request_limit: 200 }, session: { requests_used: 0, limit: 200 } };
 }
 
 const KEYED = (extra: Partial<AiProviderView> = {}) => provider({ has_key: true, active: true, key_hint: "sk-••••••••  (28 characters)", ...extra });
@@ -192,7 +192,7 @@ describe("AI Assistant", () => {
     await userEvent.selectOptions(screen.getByLabelText("Model"), "model-a");
     await userEvent.type(screen.getByLabelText("Message"), "Explain nmap -F");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(send).toHaveBeenCalledWith({ conversation_id: "c1", text: "Explain nmap -F", provider: "openai", model: "model-a" }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ conversation_id: "c1", text: "Explain nmap -F", provider: "openai", model: "model-a", confirm_large: false }));
     await emit({ request_id: "r1", conversation_id: "c1", message_id: "a1", event: "delta", text: "It scans " });
     await emit({ request_id: "r1", conversation_id: "c1", message_id: "a1", event: "delta", text: "**100** ports." });
     expect(await screen.findByText("100")).toBeInTheDocument();

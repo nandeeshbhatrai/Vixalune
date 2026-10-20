@@ -14,7 +14,7 @@ use crate::domain::assistant::model::*;
 use crate::domain::process::CancellationToken;
 use crate::domain::secret::Secret;
 use crate::domain::AppError;
-use crate::ports::{AiEventSink, AiProvider, ToolFacts, VulnSource};
+use crate::ports::{AiEventSink, AiProvider, AiStore, ToolFacts, VulnSource};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
@@ -27,11 +27,15 @@ type Responder = Box<dyn FnMut(&ChatRequest) -> String + Send>;
 struct Scripted {
     reply: Mutex<Responder>,
     requests: Mutex<Vec<ChatRequest>>,
+    /// Wait (as a provider that is slow to answer) until the request is cancelled.
+    hang: std::sync::atomic::AtomicBool,
+    /// Fail the next request with this error.
+    error: Mutex<Option<AiError>>,
 }
 
 impl Scripted {
     fn new() -> Arc<Self> {
-        Arc::new(Self { reply: Mutex::new(Box::new(|_| json!({"task_category": "general", "answer": "ok"}).to_string())), requests: Mutex::new(vec![]) })
+        Arc::new(Self { reply: Mutex::new(Box::new(|_| json!({"task_category": "general", "answer": "ok"}).to_string())), requests: Mutex::new(vec![]), hang: Default::default(), error: Mutex::new(None) })
     }
     fn set(&self, f: impl FnMut(&ChatRequest) -> String + Send + 'static) {
         *self.reply.lock().unwrap() = Box::new(f);
@@ -81,8 +85,17 @@ impl AiProvider for Scripted {
     async fn list_models(&self, _: &Secret, _: Duration, _: &CancellationToken) -> AiResult<Vec<ModelInfo>> {
         Ok(vec![ModelInfo { id: "m".into(), display_name: None, context_window: None, max_output_tokens: None, supports_tools: None, pricing: None, source: ModelSource::Listed }])
     }
-    async fn chat_stream(&self, _: &Secret, req: &ChatRequest, _: &ProviderConfig, sink: &dyn crate::ports::StreamSink, _: &CancellationToken) -> AiResult<ChatOutcome> {
+    async fn chat_stream(&self, _: &Secret, req: &ChatRequest, _: &ProviderConfig, sink: &dyn crate::ports::StreamSink, cancel: &CancellationToken) -> AiResult<ChatOutcome> {
         self.requests.lock().unwrap().push(req.clone());
+        if let Some(e) = self.error.lock().unwrap().take() {
+            return Err(e);
+        }
+        if self.hang.load(Ordering::SeqCst) {
+            while !cancel.is_cancelled() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            return Err(AiError::cancelled());
+        }
         let text = (self.reply.lock().unwrap())(req);
         let mut o = ChatOutcome::default();
         let ev = StreamEvent::TextDelta { text };
@@ -117,6 +130,7 @@ impl Events {
 }
 
 struct H {
+    store: Arc<SqliteAiStore>,
     ai: Arc<AiService>,
     svc: Arc<AssistantService>,
     facts: Arc<FakeFacts>,
@@ -131,15 +145,15 @@ async fn harness_with(vuln: FakeVulns, allow_lookup: bool) -> H {
     reg.register(model.clone()).unwrap();
     let creds = Arc::new(MemoryCredentialStore::default());
     let store = Arc::new(SqliteAiStore::in_memory().unwrap());
-    let ai = AiService::with_backoff(Arc::new(reg), creds, store, Backoff { base_ms: 1 });
+    let ai = AiService::with_backoff(Arc::new(reg), creds, store.clone(), Backoff { base_ms: 1 });
     ai.save_credential("fake", Secret::new("sk-test-0123456789abcdefghij".into()), None).unwrap();
     ai.list_models("fake").await.unwrap();
-    ai.update_settings(AiSettings { history_days: 30, allow_vulnerability_lookup: allow_lookup }).unwrap();
+    ai.update_settings(AiSettings { allow_vulnerability_lookup: allow_lookup, ..Default::default() }).unwrap();
     let conv = ai.create_conversation(Some("fake".into()), Some("m".into())).unwrap();
     let facts = Arc::new(FakeFacts::from_repo_manifests());
     let vuln = Arc::new(vuln);
     let svc = AssistantService::new(ai.clone(), facts.clone() as Arc<dyn ToolFacts>, vuln.clone() as Arc<dyn VulnSource>);
-    H { ai, svc, facts, vuln, model, conv }
+    H { store, ai, svc, facts, vuln, model, conv }
 }
 
 async fn harness() -> H {
@@ -147,7 +161,7 @@ async fn harness() -> H {
 }
 
 fn input(h: &H, text: &str) -> SendInput {
-    SendInput { conversation_id: h.conv.id.clone(), text: text.into(), provider: "fake".into(), model: "m".into() }
+    SendInput { conversation_id: h.conv.id.clone(), text: text.into(), provider: "fake".into(), model: "m".into(), confirm_large: false }
 }
 
 /// Ask and wait for the stored, validated answer.
@@ -556,8 +570,8 @@ async fn explaining_a_run_needs_consent_withholds_credentials_and_treats_the_out
     tokio::time::sleep(Duration::from_millis(20)).await;
     let sent = h.model.last().messages.last().unwrap().content.clone();
     assert!(sent.contains("CVE-2021-23337") && sent.contains("<<UNTRUSTED-") && sent.contains("kind=tool_output"));
-    assert!(!sent.contains("AKIAABCDEFGHIJKLMNOP") && !sent.contains("sk-proj-"), "credential-looking lines are withheld");
-    assert_eq!(sent.matches("[line withheld").count(), 2);
+    assert!(!sent.contains("AKIAABCDEFGHIJKLMNOP") && !sent.contains("sk-proj-"), "credential-looking values are masked");
+    assert!(sent.contains("[access key removed]") && sent.contains("token = [removed]"), "the rest of each line is kept: {sent}");
     let stored = h.ai.get_conversation(&h.conv.id).unwrap();
     assert!(stored.messages.iter().all(|m| !m.content.contains("CVE-2021-23337") || m.role == Role::Assistant), "the output itself is not stored in the conversation");
     assert!(stored.messages[0].content.starts_with("Explain the output of Trivy"));
@@ -672,7 +686,7 @@ async fn live_workflow_with_real_osv() {
     let ai = AiService::with_backoff(Arc::new(reg), Arc::new(MemoryCredentialStore::default()), Arc::new(SqliteAiStore::in_memory().unwrap()), Backoff { base_ms: 1 });
     ai.save_credential("fake", Secret::new("sk-test-0123456789abcdefghij".into()), None).unwrap();
     ai.list_models("fake").await.unwrap();
-    ai.update_settings(AiSettings { history_days: 30, allow_vulnerability_lookup: true }).unwrap();
+    ai.update_settings(AiSettings { allow_vulnerability_lookup: true, ..Default::default() }).unwrap();
     let conv = ai.create_conversation(Some("fake".into()), Some("m".into())).unwrap();
     let facts = Arc::new(FakeFacts::from_repo_manifests());
     let svc = AssistantService::new(ai.clone(), facts, Arc::new(super::osv::OsvSource::default()));
@@ -685,7 +699,7 @@ async fn live_workflow_with_real_osv() {
         .to_string()
     });
     let ev = Arc::new(Events::default());
-    let ack = svc.ask(SendInput { conversation_id: conv.id.clone(), text: "Are there vulnerabilities in lodash 4.17.15 from npm?".into(), provider: "fake".into(), model: "m".into() }, ev.clone()).await.unwrap();
+    let ack = svc.ask(SendInput { conversation_id: conv.id.clone(), text: "Are there vulnerabilities in lodash 4.17.15 from npm?".into(), provider: "fake".into(), model: "m".into(), confirm_large: false }, ev.clone()).await.unwrap();
     ev.finished().await;
     tokio::time::sleep(Duration::from_millis(30)).await;
     let t = svc.turns(&conv.id).unwrap().into_iter().find(|t| t.0 == ack.assistant_message_id).unwrap().1;
@@ -697,4 +711,420 @@ async fn live_workflow_with_real_osv() {
     }
     println!("warnings: {:?}", t.warnings);
     assert!(l.records.iter().any(|r| r.aliases.iter().any(|a| a == "CVE-2021-23337")));
+}
+
+// ====================================================================== Phase 10: hardening and release verification
+
+const KEY_MIDDLE: &str = "0123456789abcdefghij";
+const THE_KEY: &str = "sk-test-0123456789abcdefghij";
+
+/// Captures everything the application logs on this thread.
+#[derive(Clone, Default)]
+struct LogBuf(Arc<Mutex<Vec<u8>>>);
+impl std::io::Write for LogBuf {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(b);
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuf {
+    type Writer = LogBuf;
+    fn make_writer(&'a self) -> LogBuf {
+        self.clone()
+    }
+}
+
+fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            walk(&p, out);
+        } else if p.extension().is_some_and(|x| x == "rs") {
+            out.push(p);
+        }
+    }
+}
+
+fn source_files() -> Vec<(String, String)> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = vec![];
+    walk(&root, &mut files);
+    files
+        .into_iter()
+        .filter(|p| !p.file_name().unwrap().to_string_lossy().contains("tests") && !p.to_string_lossy().contains("test_support"))
+        .map(|p| (p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"), std::fs::read_to_string(&p).unwrap()))
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_key_never_reaches_the_database_logs_events_views_or_stored_answers() {
+    let logs = LogBuf::default();
+    let sub = tracing_subscriber::fmt().with_writer(logs.clone()).with_max_level(tracing::Level::TRACE).with_ansi(false).finish();
+    let _guard = tracing::subscriber::set_default(sub);
+    let h = harness().await;
+    // A successful answer, a provider error that echoes the key and a local path, then a retry.
+    h.model.set_json(json!({"task_category": "general", "answer": "ok"}));
+    let (_, _, ev1) = ask(&h, "Explain what Nmap does.").await;
+    *h.model.error.lock().unwrap() = Some(AiError { kind: AiErrorKind::Authentication, message: format!("invalid key {THE_KEY} for C:\\Users\\me\\project\\secrets.env"), status: Some(401), retry_after_secs: None });
+    let ev2 = Arc::new(Events::default());
+    let _ = h.svc.ask(input(&h, "Explain what Zap does."), ev2.clone()).await.unwrap();
+    ev2.finished().await;
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let events: Vec<AiUiEvent> = ev1.0.lock().unwrap().iter().chain(ev2.0.lock().unwrap().iter()).cloned().collect();
+    let everything = [
+        ("database", h.store.dump_text()),
+        ("logs", String::from_utf8_lossy(&logs.0.lock().unwrap()).to_string()),
+        ("events", serde_json::to_string(&events).unwrap()),
+        ("overview", serde_json::to_string(&h.ai.overview().unwrap()).unwrap()),
+        ("conversation", serde_json::to_string(&h.ai.get_conversation(&h.conv.id).unwrap()).unwrap()),
+        ("turns", serde_json::to_string(&h.svc.turns(&h.conv.id).unwrap().into_iter().map(|t| t.1).collect::<Vec<_>>()).unwrap()),
+    ];
+    for (place, text) in &everything {
+        assert!(!text.contains(THE_KEY) && !text.contains(KEY_MIDDLE), "the key is in the {place}: {}", text.chars().take(300).collect::<String>());
+        assert!(!text.contains("C:\\\\Users\\\\me") && !text.contains("secrets.env"), "a local path is in the {place}");
+    }
+    assert!(everything[0].1.contains("Complete") || everything[0].1.contains("complete") || everything[0].1.len() > 100, "the database dump is real");
+    assert!(events.iter().any(|e| matches!(&e.kind, AiUiEventKind::Finished { error: Some(err), .. } if err.kind == AiErrorKind::Authentication)));
+}
+
+#[test]
+fn only_the_ai_service_ever_reads_the_credential_store() {
+    let files = source_files();
+    let allowed_trait_users = ["ports.rs", "adapters/ai/credentials.rs", "adapters/ai/service.rs", "adapters/ai/mod.rs", "lib.rs"];
+    for (name, text) in &files {
+        if text.contains("dyn CredentialStore") || text.contains("impl CredentialStore") || text.contains("ports::CredentialStore") {
+            assert!(allowed_trait_users.contains(&name.as_str()), "{name} uses the credential store");
+        }
+        if name.starts_with("adapters/assistant/") || name == "commands.rs" || name == "engine.rs" || name.starts_with("engine/") {
+            assert!(!text.contains(".creds") && !text.contains("Secret::new(") && !text.contains("expose("), "{name} must not handle credentials");
+        }
+        if name != "adapters/ai/service.rs" && name != "adapters/ai/credentials.rs" {
+            assert!(!text.contains("self.creds") && !text.contains(".creds."), "{name} reads credentials");
+        }
+    }
+    // The IPC layer receives a key only to hand it to the service, wrapped at once, and never returns one.
+    let ipc = &files.iter().find(|f| f.0 == "ai_commands.rs").unwrap().1;
+    assert_eq!(ipc.matches("Secret::new(").count(), 1);
+    assert!(!ipc.contains("expose()"));
+    // Only the HTTP adapters take the key out of the wrapper, to put it in a request header.
+    for (name, text) in &files {
+        if text.contains(".expose()") {
+            assert!(name.starts_with("adapters/ai/") || name == "domain/secret.rs" || name == "domain/ai.rs", "{name} exposes a secret");
+        }
+    }
+}
+
+#[test]
+fn the_product_has_no_analytics_telemetry_or_crash_reporting() {
+    let cargo = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap().to_lowercase();
+    for bad in ["sentry", "bugsnag", "rollbar", "posthog", "mixpanel", "amplitude", "datadog", "appinsights", "segment", "crashpad", "minidump", "opentelemetry"] {
+        assert!(!cargo.contains(bad), "{bad} found in Cargo.toml");
+    }
+    let pkg = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("package.json")).unwrap().to_lowercase();
+    for bad in ["sentry", "posthog", "mixpanel", "amplitude", "google-analytics", "gtag", "segment", "datadog", "bugsnag"] {
+        assert!(!pkg.contains(bad), "{bad} found in package.json");
+    }
+}
+
+#[test]
+fn provider_endpoints_cannot_be_changed_by_configuration_or_content() {
+    for p in crate::adapters::ai::ProviderRegistry::builtin().descriptors() {
+        let provider = crate::adapters::ai::ProviderRegistry::builtin().get(&p.id).unwrap();
+        for key in ["base_url", "endpoint", "url", "host", "proxy", "api_base", "headers"] {
+            let mut c = ProviderConfig::new(&p.id);
+            c.extra.insert(key.into(), "https://evil.example".into());
+            assert!(provider.validate_config(&c).is_err(), "{} accepted extra setting '{key}'", p.id);
+        }
+        // The configuration structure itself refuses unknown fields, so a stored or imported config cannot add one.
+        let bad = json!({"provider": p.id, "base_url": "https://evil.example"});
+        assert!(serde_json::from_value::<ProviderConfig>(bad).is_err());
+    }
+    // Addresses must be https (or this computer), checked for every adapter at construction.
+    assert!(crate::adapters::ai::openai::OpenAi::with_base_url("http://evil.example").is_err());
+    assert!(crate::adapters::ai::anthropic::Anthropic::with_base_url("ftp://x").is_err());
+}
+
+#[tokio::test]
+async fn local_only_mode_blocks_every_cloud_path_and_keeps_local_features() {
+    let h = harness().await;
+    h.ai.update_settings(AiSettings { allow_vulnerability_lookup: true, local_only: true, ..Default::default() }).unwrap();
+    let is_local_only = |e: &AppError| matches!(e, AppError::Ai(a) if a.kind == AiErrorKind::LocalOnly);
+    let run = h.facts.add_run("trivy", "scan-folder", &["lodash 4.17.15 CVE-2021-23337"]);
+    assert!(is_local_only(&h.svc.ask(input(&h, "vulnerabilities in lodash 4.17.15 from npm"), Arc::new(Events::default())).await.unwrap_err()));
+    assert!(is_local_only(&h.svc.ask(input(&h, "Explain what Nmap does."), Arc::new(Events::default())).await.unwrap_err()));
+    assert!(is_local_only(&h.svc.explain_run(&h.conv.id, &run.to_string(), true, "fake".into(), "m".into(), Arc::new(Events::default())).await.unwrap_err()));
+    assert!(is_local_only(&h.ai.send_message(input(&h, "hello"), Arc::new(Events::default())).unwrap_err()));
+    assert!(is_local_only(&h.ai.test_connection("fake", Some("m".into())).await.unwrap_err()));
+    assert!(is_local_only(&h.ai.list_models("fake").await.unwrap_err()));
+    assert_eq!((h.model.calls(), h.vuln.calls.load(Ordering::SeqCst)), (0, 0), "no provider and no database was contacted");
+    // Local features keep working: the catalog, conversations, credentials management.
+    assert!(h.svc.run_action(Action::SearchCatalog { query: "scanner".into(), category: None, limit: None }).await.is_ok());
+    assert!(h.ai.list_conversations().is_ok());
+    assert!(h.ai.overview().unwrap().settings.local_only);
+    let e = h.ai.send_message(input(&h, "hello"), Arc::new(Events::default())).unwrap_err();
+    assert!(e.recovery().contains("catalog") && e.recovery().contains("Local-only"), "the error says what still works");
+    // Turning it off restores the assistant.
+    h.ai.update_settings(AiSettings { allow_vulnerability_lookup: true, ..Default::default() }).unwrap();
+    h.model.set_json(json!({"task_category": "general", "answer": "ok"}));
+    ask(&h, "Explain what Nmap does.").await;
+    assert_eq!(h.model.calls(), 1);
+}
+
+#[tokio::test]
+async fn request_size_confirmation_and_session_limits_are_enforced_before_anything_is_sent() {
+    let h = harness().await;
+    let nothing_stored = |h: &H| h.ai.get_conversation(&h.conv.id).unwrap().messages.is_empty();
+    // 1. A request larger than the person allows is refused.
+    h.ai.update_settings(AiSettings { max_request_chars: 2_000, ..Default::default() }).unwrap();
+    let e = h.svc.ask(input(&h, "Which tool can inspect HTTP traffic?"), Arc::new(Events::default())).await.unwrap_err();
+    assert!(matches!(&e, AppError::Ai(a) if a.kind == AiErrorKind::TooLarge), "{e:?}");
+    assert_eq!(h.model.calls(), 0);
+    assert!(nothing_stored(&h));
+    // 2. An unusually large request needs confirmation, and the confirmation is per request.
+    h.ai.update_settings(AiSettings { confirm_large_chars: 3_000, ..Default::default() }).unwrap();
+    let e = h.svc.ask(input(&h, "Which tool can inspect HTTP traffic?"), Arc::new(Events::default())).await.unwrap_err();
+    let AppError::Ai(a) = &e else { panic!("{e:?}") };
+    assert_eq!(a.kind, AiErrorKind::NeedsConfirmation);
+    assert!(a.message.contains("characters") && a.message.contains("Fake"), "{}", a.message);
+    assert_eq!(h.model.calls(), 0);
+    assert!(nothing_stored(&h), "nothing is stored until the person confirms");
+    let mut confirmed = input(&h, "Which tool can inspect HTTP traffic?");
+    confirmed.confirm_large = true;
+    h.model.set_json(json!({"task_category": "network_traffic", "answer": "ok"}));
+    let ev = Arc::new(Events::default());
+    h.svc.ask(confirmed, ev.clone()).await.unwrap();
+    ev.finished().await;
+    assert_eq!(h.model.calls(), 1);
+    // 3. A session limit stops the spend, and failures that never reached a provider do not use it up.
+    h.ai.update_settings(AiSettings { session_request_limit: 2, ..Default::default() }).unwrap();
+    let used = h.ai.overview().unwrap().session.requests_used;
+    assert_eq!(used, 1);
+    ask(&h, "Explain what Nmap does.").await;
+    let e = h.svc.ask(input(&h, "Explain what Zap does."), Arc::new(Events::default())).await.unwrap_err();
+    assert!(matches!(&e, AppError::Ai(a) if a.kind == AiErrorKind::LimitReached), "{e:?}");
+    let o = h.ai.overview().unwrap();
+    assert_eq!((o.session.requests_used, o.session.limit), (2, 2));
+    assert_eq!(h.model.calls(), 2);
+    // 4. Settings are range-checked.
+    for bad in [AiSettings { max_request_chars: 10, ..Default::default() }, AiSettings { max_request_chars: 9_999_999, ..Default::default() }, AiSettings { session_request_limit: 9_999_999, ..Default::default() }] {
+        assert!(h.ai.update_settings(bad).is_err());
+    }
+}
+
+#[test]
+fn local_paths_and_headers_are_removed_from_cloud_error_text() {
+    for (input, must_not_contain) in [
+        ("Cannot open C:\\Users\\alice\\Documents\\keys.txt for reading", "alice"),
+        ("failed at \\\\fileserver\\share\\hr\\salaries.xlsx", "salaries"),
+        ("path D:/work/project/.env missing", ".env"),
+        ("see /home/bob/.ssh/id_rsa", "bob"),
+        ("request failed. Authorization: Bearer abcdefghijklmnop", "abcdefghijklmnop"),
+        ("x-api-key: sk-ant-abcdefghijklmnopqrstu", "abcdefghijklmnopqrstu"),
+        ("x-goog-api-key: AIzaSyA1234567890abcdefghijklmnopqrstuv", "AIzaSyA1234567890"),
+        ("GET https://user:hunter2password@example.com/x?api_key=SECRETVALUE123", "hunter2password"),
+        ("GET https://example.com/x?key=SECRETVALUE123456", "SECRETVALUE123456"),
+    ] {
+        let out = sanitize_message(input, None);
+        assert!(!out.contains(must_not_contain), "{input} -> {out}");
+    }
+    assert!(sanitize_message("model gpt-4o is not available", None).contains("gpt-4o"), "ordinary text is kept");
+}
+
+#[test]
+fn secrets_in_pasted_scan_output_are_masked_and_the_rest_is_kept() {
+    let text = "lodash 4.17.15 CVE-2021-23337 HIGH\n-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA1234567890abcdef\n-----END RSA PRIVATE KEY-----\naws_access_key_id = AKIAABCDEFGHIJKLMNOP\npassword: \"hunter2hunter2\"\nAuthorization: Bearer abcdefghijklmnop.qrstuvwx\ncurl https://admin:s3cretpass@db.internal/x\njwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop\nnormal line about 4.17.21";
+    let (out, n) = redact_secrets_in_text(text);
+    for secret in ["MIIEpAIBAAKCAQEA", "AKIAABCDEFGHIJKLMNOP", "hunter2hunter2", "abcdefghijklmnop.qrstuvwx", "s3cretpass", "eyJhbGciOiJIUzI1NiJ9"] {
+        assert!(!out.contains(secret), "{secret} survived in:\n{out}");
+    }
+    assert!(out.contains("lodash 4.17.15 CVE-2021-23337 HIGH") && out.contains("normal line about 4.17.21"), "findings are kept:\n{out}");
+    assert!(n >= 6, "{n}");
+    assert_eq!(redact_secrets_in_text("nothing secret here").1, 0);
+}
+
+#[tokio::test]
+async fn stopping_an_assistant_request_keeps_nothing_unvalidated() {
+    let h = harness().await;
+    h.model.hang.store(true, Ordering::SeqCst);
+    let ev = Arc::new(Events::default());
+    let ack = h.svc.ask(input(&h, "Explain what Nmap does."), ev.clone()).await.unwrap();
+    for _ in 0..200 {
+        if h.model.calls() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    h.ai.cancel(&ack.request_id).unwrap();
+    let AiUiEventKind::Finished { status, error, .. } = ev.finished().await.kind else { panic!() };
+    assert_eq!(status, MessageStatus::Cancelled);
+    assert_eq!(error.unwrap().kind, AiErrorKind::Cancelled);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let m = h.ai.get_conversation(&h.conv.id).unwrap().messages.into_iter().find(|m| m.id == ack.assistant_message_id).unwrap();
+    assert_eq!((m.content.as_str(), m.status), ("", MessageStatus::Cancelled));
+    assert!(h.svc.turns(&h.conv.id).unwrap().is_empty());
+    assert_eq!(h.model.calls(), 1, "nothing was re-sent by itself");
+    // Retrying is the person's choice and works.
+    h.model.hang.store(false, Ordering::SeqCst);
+    h.model.set_json(json!({"task_category": "general", "answer": "ok"}));
+    let ev2 = Arc::new(Events::default());
+    h.svc.retry(&h.conv.id, "fake".into(), "m".into(), ev2.clone()).await.unwrap();
+    assert!(matches!(ev2.finished().await.kind, AiUiEventKind::Finished { status: MessageStatus::Complete, .. }));
+}
+
+#[tokio::test]
+async fn offline_operation_fails_clearly_without_inventing_or_hanging() {
+    // The vulnerability database is unreachable (nothing listens on port 1).
+    let model = Scripted::new();
+    let mut reg = ProviderRegistry::new();
+    reg.register(model.clone()).unwrap();
+    let ai = AiService::with_backoff(Arc::new(reg), Arc::new(MemoryCredentialStore::default()), Arc::new(SqliteAiStore::in_memory().unwrap()), Backoff { base_ms: 1 });
+    ai.save_credential("fake", Secret::new(THE_KEY.into()), None).unwrap();
+    ai.list_models("fake").await.unwrap();
+    ai.update_settings(AiSettings { allow_vulnerability_lookup: true, ..Default::default() }).unwrap();
+    let conv = ai.create_conversation(Some("fake".into()), Some("m".into())).unwrap();
+    let svc = AssistantService::new(ai.clone(), Arc::new(FakeFacts::from_repo_manifests()), Arc::new(super::osv::OsvSource::with_bases("http://127.0.0.1:1", "http://127.0.0.1:1")));
+    let ev = Arc::new(Events::default());
+    let started = std::time::Instant::now();
+    let ack = svc.ask(SendInput { conversation_id: conv.id.clone(), text: "vulnerabilities in lodash 4.17.15 from npm".into(), provider: "fake".into(), model: "m".into(), confirm_large: false }, ev.clone()).await.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(25));
+    let t = svc.turns(&conv.id).unwrap().into_iter().find(|t| t.0 == ack.assistant_message_id).unwrap().1;
+    assert_eq!(t.kind, TurnKind::Declined);
+    assert!(t.explanation.contains("Nothing was verified") && !t.explanation.contains("127.0.0.1"), "{}", t.explanation);
+    assert_eq!(model.calls(), 0);
+    // A provider that cannot be reached is a classified network error.
+    let openai = crate::adapters::ai::openai::OpenAi::with_base_url("http://127.0.0.1:1/v1").unwrap();
+    let e = openai.check_auth(&Secret::new(THE_KEY.into()), Duration::from_secs(5), &CancellationToken::new()).await.unwrap_err();
+    assert_eq!(e.kind, AiErrorKind::Network);
+    assert!(!e.message.contains(THE_KEY));
+}
+
+#[test]
+fn an_upgrade_keeps_existing_conversations_and_fills_in_new_settings_with_safe_defaults() {
+    // The database as the previous release (Phase 8) created it: no answers table, settings without the newer fields.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("old.db");
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE ai_providers (provider TEXT PRIMARY KEY, config_json TEXT NOT NULL, status_json TEXT NOT NULL, key_hint TEXT);
+             CREATE TABLE ai_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE ai_conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL, provider TEXT, model TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+             CREATE TABLE ai_messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL, error_code TEXT, error_message TEXT, provider TEXT, model TEXT, usage_json TEXT, created_at TEXT NOT NULL);
+             INSERT INTO ai_meta VALUES ('settings', '{\"history_days\":10}');
+             INSERT INTO ai_meta VALUES ('active_provider', 'openai');
+             INSERT INTO ai_providers VALUES ('openai', '{\"provider\":\"openai\",\"label\":\"work\",\"default_model\":\"gpt-x\",\"timeout_secs\":45}', '{\"state\":\"verified\",\"tested_at\":null,\"error_code\":null,\"message\":null,\"steps\":[],\"models_listed\":null,\"verified_models\":[\"gpt-x\"]}', 'sk-••••');
+             INSERT INTO ai_conversations VALUES ('c1', 'Old chat', 'openai', 'gpt-x', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+             INSERT INTO ai_messages VALUES ('m1', 'c1', 1, 'user', 'hello', 'complete', NULL, NULL, NULL, NULL, NULL, '2026-10-01T00:00:00Z');
+             INSERT INTO ai_messages VALUES ('m2', 'c1', 2, 'assistant', 'hi there', 'complete', NULL, NULL, 'openai', 'gpt-x', NULL, '2026-10-01T00:00:00Z');",
+        )
+        .unwrap();
+    }
+    let store = SqliteAiStore::open(&path).unwrap();
+    let s = store.get_settings().unwrap();
+    assert_eq!(s.history_days, 10, "the person's choice is kept");
+    assert!(!s.allow_vulnerability_lookup && !s.local_only, "new consents default to off");
+    assert_eq!((s.max_request_chars, s.confirm_large_chars, s.session_request_limit), (200_000, 60_000, 200));
+    assert_eq!(store.get_config("openai").unwrap().unwrap().timeout_secs, 45);
+    assert_eq!(store.get_config("openai").unwrap().unwrap().label.as_deref(), Some("work"));
+    assert_eq!(store.active_provider().unwrap().as_deref(), Some("openai"));
+    assert_eq!(store.list_messages("c1").unwrap().len(), 2);
+    // The new table works, and is cleaned up with its message.
+    store.put_turn("m2", "c1", "{}").unwrap();
+    assert_eq!(store.list_turns("c1").unwrap().len(), 1);
+    store.delete_message("m2").unwrap();
+    assert!(store.list_turns("c1").unwrap().is_empty());
+    // Reopening is harmless.
+    drop(store);
+    assert!(SqliteAiStore::open(&path).is_ok());
+}
+
+#[tokio::test]
+async fn invalid_or_hostile_structured_replies_are_rejected_without_effect() {
+    let h = harness().await;
+    let huge = format!("{{\"task_category\":\"general\",\"answer\":\"{}\"}}", "x".repeat(150_000));
+    let many_actions = json!({"task_category": "general", "proposed_actions": (0..500).map(|_| json!({"action": "search_catalog", "query": "x"})).collect::<Vec<_>>()});
+    for (label, reply) in [
+        ("wrong types", json!({"task_category": "general", "recommended_tools": "trivy"}).to_string()),
+        ("missing category", json!({"answer": "x"}).to_string()),
+        ("unknown fields", json!({"task_category": "general", "run": "calc.exe"}).to_string()),
+        ("too large", huge),
+        ("not json", "```\nsure\n```".to_string()),
+    ] {
+        h.model.set(move |_| reply.clone());
+        let ev = Arc::new(Events::default());
+        let ack = h.svc.ask(input(&h, "Explain what Nmap does."), ev.clone()).await.unwrap();
+        let AiUiEventKind::Finished { status, .. } = ev.finished().await.kind else { panic!() };
+        assert_eq!(status, MessageStatus::Failed, "{label}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(h.svc.turns(&h.conv.id).unwrap().iter().all(|t| t.0 != ack.assistant_message_id), "{label}");
+        let _ = h.ai.take_last_failed_question(&h.conv.id);
+    }
+    // 500 suggested actions are cut to a handful, and none runs.
+    h.model.set_json(many_actions);
+    let (_, t, _) = ask(&h, "Explain what Nmap does.").await;
+    assert!(t.proposed_actions.len() <= 6);
+    assert_eq!((h.facts.previews.load(Ordering::SeqCst), h.facts.plans.load(Ordering::SeqCst)), (0, 0));
+    // An unknown task category is tolerated, not trusted.
+    h.model.set_json(json!({"task_category": "make_coffee", "answer": "ok"}));
+    let (_, t, _) = ask(&h, "Explain what Zap does.").await;
+    assert_eq!(t.task_category, TaskCategory::Other);
+}
+
+#[tokio::test]
+async fn deleting_a_conversation_deletes_its_answers_and_a_reply_cannot_outlive_it() {
+    let h = harness().await;
+    h.model.set_json(json!({"task_category": "general", "answer": "ok"}));
+    ask(&h, "Explain what Nmap does.").await;
+    assert_eq!(h.svc.turns(&h.conv.id).unwrap().len(), 1);
+    h.ai.delete_conversation(&h.conv.id).unwrap();
+    assert!(h.ai.turns(&h.conv.id).unwrap().is_empty());
+    assert!(!h.store.dump_text().contains("Nmap"), "no trace of the conversation remains in the database");
+    // And "delete everything".
+    let c2 = h.ai.create_conversation(None, None).unwrap();
+    let ev = Arc::new(Events::default());
+    h.svc.ask(SendInput { conversation_id: c2.id.clone(), text: "Explain what Zap does.".into(), provider: "fake".into(), model: "m".into(), confirm_large: false }, ev.clone()).await.unwrap();
+    ev.finished().await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(h.ai.delete_all_conversations().unwrap(), 1);
+    assert!(!h.store.dump_text().contains("Zap"));
+}
+
+#[tokio::test]
+async fn authentication_failure_then_replacing_the_key_recovers_without_restarting() {
+    let h = harness().await;
+    *h.model.error.lock().unwrap() = Some(AiError::new(AiErrorKind::Authentication, "invalid api key").status(401));
+    let ev = Arc::new(Events::default());
+    h.svc.ask(input(&h, "Explain what Nmap does."), ev.clone()).await.unwrap();
+    let AiUiEventKind::Finished { status, error, .. } = ev.finished().await.kind else { panic!() };
+    assert_eq!(status, MessageStatus::Failed);
+    let e = error.unwrap();
+    assert_eq!(e.kind, AiErrorKind::Authentication);
+    assert!(e.recovery.contains("Settings") && !e.message.contains(THE_KEY));
+    assert_eq!(h.model.calls(), 1, "an authentication failure is never retried automatically");
+    h.ai.save_credential("fake", Secret::new("sk-test-REPLACEMENT-9876543210".into()), None).unwrap();
+    h.ai.list_models("fake").await.unwrap(); // a new key starts untested; models are listed again with it
+    h.model.set_json(json!({"task_category": "general", "answer": "ok"}));
+    let ev = Arc::new(Events::default());
+    h.svc.retry(&h.conv.id, "fake".into(), "m".into(), ev.clone()).await.unwrap();
+    assert!(matches!(ev.finished().await.kind, AiUiEventKind::Finished { status: MessageStatus::Complete, .. }));
+}
+
+#[tokio::test]
+async fn secrets_pasted_into_a_question_are_masked_before_it_is_stored_or_sent() {
+    let h = harness().await;
+    h.model.set_json(json!({"task_category": "explain_output", "answer": "ok"}));
+    let ev = Arc::new(Events::default());
+    let ack = h.svc.ask(input(&h, "My scan printed password: hunter2hunter2 and jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop in its output. What does it mean?"), ev.clone()).await.unwrap();
+    ev.finished().await;
+    assert!(ack.redacted_values >= 2, "{}", ack.redacted_values);
+    let sent = format!("{:?}", h.model.last());
+    assert!(!sent.contains("hunter2hunter2") && !sent.contains("eyJhbGciOiJIUzI1NiJ9"), "the model never saw them");
+    assert!(sent.contains("What does it mean"), "the rest of the question is kept");
+    let stored = serde_json::to_string(&h.ai.get_conversation(&h.conv.id).unwrap()).unwrap();
+    assert!(!stored.contains("hunter2hunter2") && !stored.contains("eyJhbGciOiJIUzI1NiJ9"));
+    assert!(!h.store.dump_text().contains("hunter2hunter2"));
 }

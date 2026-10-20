@@ -57,3 +57,7 @@ Only test systems you own or have written permission to test. Do not point Vixal
 - No tools are offered to a model. The action set is closed and typed, has no install/run/command action, and authorization (model origin may only read catalog records; lookups need consent; runs need the person) is decided in code.
 - Untrusted text (user messages, vulnerability descriptions, scan output) is cleaned, bounded and fenced with a per-request random marker, but the defence does not rely on the model obeying it.
 - Package lookups send only ecosystem, name and version to OSV/NVD, and only after consent. Scan output is shared only after the person confirms, with credential-looking lines withheld, and is not stored in the conversation.
+
+## AI hardening
+
+Local-only mode, request-size/confirmation/session limits, secret masking, and path redaction in provider errors: see AI_SECURITY.md and PRIVACY.md.

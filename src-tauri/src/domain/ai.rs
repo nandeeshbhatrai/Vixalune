@@ -212,6 +212,12 @@ pub enum AiErrorKind {
     CredentialStore,
     Protocol,
     TooLarge,
+    /// Local-only mode is on: no cloud AI request is made.
+    LocalOnly,
+    /// The per-session request limit has been reached.
+    LimitReached,
+    /// The request is unusually large; the person must confirm before it is sent.
+    NeedsConfirmation,
 }
 
 impl AiErrorKind {
@@ -234,6 +240,9 @@ impl AiErrorKind {
             Self::CredentialStore => "ai_credential_store",
             Self::Protocol => "ai_protocol",
             Self::TooLarge => "ai_too_large",
+            Self::LocalOnly => "ai_local_only",
+            Self::LimitReached => "ai_limit_reached",
+            Self::NeedsConfirmation => "ai_needs_confirmation",
         }
     }
 
@@ -257,6 +266,9 @@ impl AiErrorKind {
             Self::CredentialStore => "Windows Credential Manager could not be used, so the key was not saved or read. Vixalune does not store keys anywhere else. Check that your Windows account can use Credential Manager, then try again.",
             Self::Protocol => "The provider sent something unexpected. Try again; if it keeps happening, the provider may have changed its API.",
             Self::TooLarge => "The message or response was larger than Vixalune allows. Shorten the message or start a new conversation.",
+            Self::LocalOnly => "Local-only mode is on, so nothing is sent to an AI provider. Turn it off in Settings, AI Providers to use the assistant. The catalog, installation and running tools still work.",
+            Self::LimitReached => "The per-session request limit you set has been reached. Restart Vixalune, or raise the limit in Settings, AI Providers.",
+            Self::NeedsConfirmation => "Nothing was sent. Confirm that you want to send this large request, or shorten it.",
         }
     }
 
@@ -340,6 +352,45 @@ fn patterns() -> &'static [Regex] {
     })
 }
 
+fn path_re() -> &'static Regex {
+    static P: OnceLock<Regex> = OnceLock::new();
+    P.get_or_init(|| Regex::new(r#"(?i)(\b[a-z]:[\\/][^\s"'<>|]*|\\\\[\w.$-]+\\[^\s"'<>|]*|(?:^|\s)/(?:home|users|var|etc|tmp|opt|mnt)/[^\s"'<>|]*)"#).expect("static pattern"))
+}
+
+fn scan_secret_patterns() -> &'static [(Regex, &'static str)] {
+    static P: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
+    P.get_or_init(|| {
+        [
+            (r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|\z)", "[private key removed]"),
+            (r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b", "[access key removed]"),
+            (r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b", "[token removed]"),
+            (r"\bgh[pousr]_[A-Za-z0-9]{30,}\b", "[token removed]"),
+            (r"\bxox[abprs]-[A-Za-z0-9\-]{10,}", "[token removed]"),
+            (r#"(?i)\b((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret)\b\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;]+)"#, "$1[removed]"),
+        ]
+        .iter()
+        .map(|(p, r)| (Regex::new(p).expect("static pattern"), *r))
+        .collect()
+    })
+}
+
+/// Mask credentials in text that is about to be shared (scanner output): private keys, access keys, tokens, `password=...`
+/// assignments, bearer tokens, URL credentials and key-shaped strings. The rest of each line is kept. Returns the text and how
+/// many values were masked. Best effort: it cannot find every possible secret.
+pub fn redact_secrets_in_text(text: &str) -> (String, usize) {
+    let mut out = text.to_string();
+    let mut n = 0usize;
+    for (re, with) in scan_secret_patterns() {
+        n += re.find_iter(&out).count();
+        out = re.replace_all(&out, *with).into_owned();
+    }
+    for re in patterns() {
+        n += re.find_iter(&out).count();
+        out = re.replace_all(&out, "[removed]").into_owned();
+    }
+    (out, n)
+}
+
 /// Make text safe to show, store or log: the exact secret (if known) and anything shaped like a credential are masked,
 /// control characters are removed and the length is bounded.
 pub fn sanitize_message(text: &str, secret: Option<&str>) -> String {
@@ -363,6 +414,7 @@ pub fn sanitize_message(text: &str, secret: Option<&str>) -> String {
         })
         .into_owned();
     }
+    let s = path_re().replace_all(&s, "[path removed]").into_owned();
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if s.chars().count() > MAX_ERROR_MESSAGE_CHARS {
         let cut: String = s.chars().take(MAX_ERROR_MESSAGE_CHARS).collect();
@@ -635,6 +687,30 @@ pub struct AiSettings {
     /// The person agreed that package names and versions they ask about may be sent to public vulnerability databases (OSV, NVD).
     #[serde(default)]
     pub allow_vulnerability_lookup: bool,
+    /// No cloud AI request is made at all (chat, assistant, connection tests, model lists, vulnerability lookups).
+    #[serde(default)]
+    pub local_only: bool,
+    /// Largest request (system prompt, history and new message together) that may be sent, in characters (2000-200000).
+    #[serde(default = "default_max_request_chars")]
+    pub max_request_chars: u32,
+    /// Requests above this size need the person's confirmation first (0 = never ask).
+    #[serde(default = "default_confirm_large_chars")]
+    pub confirm_large_chars: u32,
+    /// Most requests Vixalune will send to providers in one run of the application (0 = no limit).
+    #[serde(default = "default_session_request_limit")]
+    pub session_request_limit: u32,
+}
+
+fn default_max_request_chars() -> u32 {
+    200_000
+}
+
+fn default_confirm_large_chars() -> u32 {
+    60_000
+}
+
+fn default_session_request_limit() -> u32 {
+    200
 }
 
 fn default_history_days() -> u32 {
@@ -643,7 +719,7 @@ fn default_history_days() -> u32 {
 
 impl Default for AiSettings {
     fn default() -> Self {
-        Self { history_days: default_history_days(), allow_vulnerability_lookup: false }
+        Self { history_days: default_history_days(), allow_vulnerability_lookup: false, local_only: false, max_request_chars: default_max_request_chars(), confirm_large_chars: default_confirm_large_chars(), session_request_limit: default_session_request_limit() }
     }
 }
 
@@ -651,6 +727,15 @@ impl AiSettings {
     pub fn validate(&self) -> super::AppResult<()> {
         if self.history_days > 3650 {
             return Err(super::AppError::Validation("conversation history must be kept 0-3650 days".into()));
+        }
+        if !(2_000..=200_000).contains(&self.max_request_chars) {
+            return Err(super::AppError::Validation("the largest request must be 2000 to 200000 characters".into()));
+        }
+        if self.confirm_large_chars > 200_000 {
+            return Err(super::AppError::Validation("the confirmation size must be 0 to 200000 characters".into()));
+        }
+        if self.session_request_limit > 100_000 {
+            return Err(super::AppError::Validation("the session request limit must be 0 to 100000".into()));
         }
         Ok(())
     }

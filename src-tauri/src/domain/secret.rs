@@ -8,6 +8,11 @@ use zeroize::Zeroize;
 pub struct Secret(String);
 
 impl Secret {
+    /// A placeholder for requests that carry no credential at all (public APIs).
+    pub fn none() -> Self {
+        Self(String::new())
+    }
+
     pub fn new(value: String) -> Self {
         Self(value)
     }

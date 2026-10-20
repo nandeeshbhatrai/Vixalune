@@ -33,7 +33,8 @@ function overview(): AiOverview {
       },
     ],
     credential_backend: "Windows Credential Manager",
-    settings: { history_days: 30, allow_vulnerability_lookup: false },
+    settings: { history_days: 30, allow_vulnerability_lookup: false, local_only: false, max_request_chars: 200000, confirm_large_chars: 60000, session_request_limit: 200 },
+    session: { requests_used: 0, limit: 200 },
   };
 }
 
@@ -231,7 +232,7 @@ describe("tool-aware assistant answers", () => {
     expect(perm).toHaveTextContent("send the package name and version");
     expect(update).not.toHaveBeenCalled();
     await userEvent.click(within(perm).getByRole("button", { name: "Allow lookups and ask again" }));
-    await waitFor(() => expect(update).toHaveBeenCalledWith({ history_days: 30, allow_vulnerability_lookup: true }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ history_days: 30, allow_vulnerability_lookup: true, local_only: false, max_request_chars: 200000, confirm_large_chars: 60000, session_request_limit: 200 }));
     expect(screen.getByLabelText("Message")).toHaveValue("Help me scan my own project");
   });
 
@@ -264,7 +265,7 @@ describe("asking the tool-aware assistant", () => {
     await userEvent.selectOptions(screen.getByLabelText("Model"), "m");
     await userEvent.type(screen.getByLabelText("Message"), "Help me scan my own project");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(ask).toHaveBeenCalledWith({ conversation_id: "c1", text: "Help me scan my own project", provider: "fake", model: "m" }));
+    await waitFor(() => expect(ask).toHaveBeenCalledWith({ conversation_id: "c1", text: "Help me scan my own project", provider: "fake", model: "m", confirm_large: false }));
     expect(send).not.toHaveBeenCalled();
     expect(await screen.findByText(/Checking the catalog and drafting an answer/)).toBeInTheDocument();
   });

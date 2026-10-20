@@ -173,7 +173,7 @@ fn harness() -> H {
 }
 
 fn input(c: &Conversation, text: &str, model: &str) -> SendInput {
-    SendInput { conversation_id: c.id.clone(), text: text.into(), provider: "fake".into(), model: model.into() }
+    SendInput { conversation_id: c.id.clone(), text: text.into(), provider: "fake".into(), model: model.into(), confirm_large: false }
 }
 
 async fn ready(h: &H) -> Conversation {
@@ -543,6 +543,7 @@ async fn messages_that_contain_credentials_or_are_too_large_are_refused() {
 #[tokio::test]
 async fn the_conversation_sent_to_the_provider_is_bounded() {
     let h = harness();
+    h.svc.update_settings(AiSettings { confirm_large_chars: 0, ..Default::default() }).unwrap();
     let c = ready(&h).await;
     let long = "w".repeat(45_000);
     for i in 0..6 {
